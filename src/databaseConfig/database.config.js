@@ -1,21 +1,17 @@
 import mongoose from "mongoose";
 import { dbName } from "../constants/constants.js";
+import { env } from "./env.js";
+const dbConnect = async () => {
+  try {
+    const mongoUrl = `${env.MONGO_URI}/${dbName}`;
 
-const dbConnect = async ()=>{
-    try {
-        await mongoose.connect(process.env.MONGODB_URL/dbName)
-        .then((res)=>{
-            console.log("Database connected successfully");
-        })
-        .catch((err)=>{
-            console.log("Failed to connect db : ", err);
-        });
-    } catch (error) {
-        console.log("Database connection error : ", error);
-    }
-    
+    await mongoose.connect(mongoUrl);
 
-}
-
+    console.log("Database connected successfully");
+  } catch (error) {
+    console.error("Failed to connect db :", error.message);
+    process.exit(1); // app stop if DB fails
+  }
+};
 
 export default dbConnect;

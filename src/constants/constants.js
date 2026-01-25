@@ -1,4 +1,4 @@
-const dbName = NoteQ;
+const dbName = "NoteQ";
 
 
 

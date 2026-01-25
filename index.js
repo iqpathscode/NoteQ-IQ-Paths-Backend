@@ -1,32 +1,14 @@
-import dotenv from "dotenv";
-dotenv.config()
+// index.js
+import app from './app.js';
+import dbConnect from "./src/databaseConfig/database.config.js";
+import { env } from "./src/databaseConfig/env.js";
 
-import express from "express";
-import dbConnect from "./databaseConfig/database.config.js";
-const app = express();
+const port = env.PORT || 5000;
 
-const port = process.env.PORT || 5000;
+// DB connect
+await dbConnect();
 
-try {
-    dbConnect()
-    .then((res)=>{
-        console.log("Database connected successfully");
-    })
-    .catch((err)=>{
-        console.log("Failed to connect db : ", err);
-    });
-
-    app.listen(port , ()=>{
-        console.log(`Server is running on port ${port}`);
-    })
-} catch (err) {
-    console.log("Database call in index and get a error :",err)
-    process.exit(1);
-}
-
-
-app.get('/',(req,res)=>{
-    res.send("NoteQ is here live !!")
-})
-
-
+// server start
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});

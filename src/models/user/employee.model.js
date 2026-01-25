@@ -1,50 +1,60 @@
 import mongoose from 'mongoose';
-import Department from '../office/department.model';
 
-const employeeSchema = new mongoose.Schema({
-  emp_id: {
-    type: Number, //always a integer number 
-    required: true,
-    unique: true,
-    trim: true
-  }, 
-  emp_name: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  designation: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  mobile_number: {
-    type: Number,
-    required: true,
-    trim: true,
-  },
+const employeeSchema = new mongoose.Schema(
+  {
+    emp_id: {
+      type: Number,
+      required: true,
+      unique: true
+    },
+    emp_name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    designation: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    mobile_number: {
+      type: String,
+      required: true,
+      unique: true
+    },
     email: {
-    type: String,
-    required: true,
-    trim: true,
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true
+    },
+
+    // AUTH FIELDS
+    password: {
+      type: String,
+      required: true
+    },
+    is_active: {
+      type: Boolean,
+      default: true
+    },
+    last_login: {
+      type: Date,
+      default: null
+    },
+
+    // RELATIONS
+    dept_id: {
+      type: Number,
+      required: true
+    },
+    role_id: {
+      type: Number,
+      required: true
+    }
   },
-  dept_id: {  //number
-    type : Number,
-    required : true,
-    trim : true,
-    // type: mongoose.Schema.Types.ObjectId,  //_id
-    // ref: 'Department',
-    // required: true
-  },
-  role_id: {
-    type: Number,
-    default: 0
-  }
-}, {
-  timestamps: true
-});
+  { timestamps: true }
+);
 
 const Employee = mongoose.model('Employee', employeeSchema);
-
 export default Employee;
-
