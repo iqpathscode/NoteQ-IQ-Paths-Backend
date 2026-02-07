@@ -13,7 +13,7 @@ export const signup = async (req, res) => {
       dept_id,
       role_id
     } = req.body;
-
+    console.log(req.body);
     // check existing user
     const existingUser = await Employee.findOne({
       $or: [{ email }, { mobile_number }]
@@ -54,6 +54,7 @@ export const signup = async (req, res) => {
       success: false,
       message: 'Signup failed',
       error: error.message
+      
     });
   }
 };

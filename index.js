@@ -1,7 +1,7 @@
 // index.js
 import app from './app.js';
-import dbConnect from "./src/databaseConfig/database.config.js";
-import { env } from "./src/databaseConfig/env.js";
+import dbConnect from "./src/config/db.config.js";
+import { env } from "./src/config/env.config.js";
 
 const port = env.PORT || 5000;
 

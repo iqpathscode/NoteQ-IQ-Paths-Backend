@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import Employee from '../../models/user/employee.model.js';
-import { JWT_SECRET, JWT_EXPIRES_IN } from '../../databaseConfig/jwt.js';
+import { JWT_SECRET, JWT_EXPIRES_IN } from '../../config/jwt.js';
 
 export const login = async (req, res) => {
   try {
@@ -42,6 +42,7 @@ export const login = async (req, res) => {
       { expiresIn: JWT_EXPIRES_IN }
     );
 
+    
     user.last_login = new Date();
     await user.save();
 

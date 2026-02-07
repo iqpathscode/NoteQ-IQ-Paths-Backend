@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { dbName } from "../constants/constants.js";
-import { env } from "./env.js";
+import { env } from "./env.config.js";
 const dbConnect = async () => {
   try {
     const mongoUrl = `${env.MONGO_URI}/${dbName}`;
