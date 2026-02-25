@@ -12,10 +12,18 @@ const notesheetFlowSchema = new mongoose.Schema(
       required: true
     },
 
+    from_role_id: { 
+      type: Number
+     },
+
     to_emp_id: {
       type: Number,
       default: null
     },
+
+    to_role_id: {
+       type: Number 
+      },
 
     action: {
       type: String,
@@ -32,15 +40,21 @@ const notesheetFlowSchema = new mongoose.Schema(
     level: {
       type: Number,
       required: true
-    }
+    },
+
+    final_status: { 
+      type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], 
+      default: 'PENDING' }
   },
   {
     timestamps: true
   }
 );
 
-// Fast history fetch
-notesheetFlowSchema.index({ note_id: 1, createdAt: 1 });
+// Fast history + current approver fetch 
+notesheetFlowSchema.index({ note_id: 1, createdAt: 1 }); 
+notesheetFlowSchema.index({ note_id: 1, level: 1 });
+notesheetFlowSchema.index({ note_id: 1, final_status: 1 });
 
 const NotesheetFlow = mongoose.model(
   'NotesheetFlow',

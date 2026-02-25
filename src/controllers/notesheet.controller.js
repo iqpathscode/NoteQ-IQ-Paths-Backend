@@ -1,7 +1,8 @@
 import Notesheet from "../models/notes/notesheet.model.js";
 import Employee from "../models/user/employee.model.js";
+import NotesheetFlow from "../models/notes/notesheetFlow.model.js"; // import added
 
-const notesheetViewPipeline = (matchStage = null) => {
+export const notesheetViewPipeline = (matchStage = null) => {
   const pipeline = [];
 
   if (matchStage) {
@@ -9,6 +10,7 @@ const notesheetViewPipeline = (matchStage = null) => {
   }
 
   pipeline.push(
+    // Sender lookup
     {
       $lookup: {
         from: Employee.collection.name,
@@ -17,12 +19,22 @@ const notesheetViewPipeline = (matchStage = null) => {
         as: "sender"
       }
     },
+    // Receiver lookup
     {
       $lookup: {
         from: Employee.collection.name,
         localField: "forward_to",
         foreignField: "emp_id",
         as: "receiver"
+      }
+    },
+    //  Approval chain lookup
+    {
+      $lookup: {
+        from: NotesheetFlow.collection.name,
+        localField: "note_id",
+        foreignField: "note_id",
+        as: "approvalChain"
       }
     },
     {
@@ -40,16 +52,15 @@ const notesheetViewPipeline = (matchStage = null) => {
         date: "$createdAt",
         status: 1,
         description: 1,
-        attachments: {
-          $cond: [{ $ifNull: ["$attachment", false] }, ["$attachment"], []]
-        },
+        attachment: "$attachment",
         submittedBy: 1,
         submittedTo: 1,
         category: { $literal: null },
         priority: { $literal: null },
         emp_id: 1,
         dept_id: 1,
-        forward_to: 1
+        forward_to: 1,
+        approvalChain: 1 //  new field
       }
     }
   );
@@ -60,6 +71,7 @@ const notesheetViewPipeline = (matchStage = null) => {
 export const getNotesheetsForEmployee = async (req, res) => {
   try {
     const empId = Number(req.query.empId);
+    const status = req.query.status; // optional filter
 
     if (!empId) {
       return res.status(400).json({
@@ -68,8 +80,11 @@ export const getNotesheetsForEmployee = async (req, res) => {
       });
     }
 
+    const matchStage = { emp_id: empId };
+    if (status) matchStage.status = status; //  filter by status
+
     const notesheets = await Notesheet.aggregate(
-      notesheetViewPipeline({ $match: { emp_id: empId } })
+      notesheetViewPipeline({ $match: matchStage })
     );
 
     return res.status(200).json({
@@ -85,6 +100,7 @@ export const getNotesheetsForEmployee = async (req, res) => {
     });
   }
 };
+
 
 export const getNotesheetById = async (req, res) => {
   try {
@@ -115,6 +131,73 @@ export const getNotesheetById = async (req, res) => {
       message: "Notesheet fetched successfully",
       data: notesheet
     });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+export const getAllNotesheets = async (req, res) => {
+  try {
+    const notesheets = await Notesheet.aggregate(
+      notesheetViewPipeline() // bina matchStage ke sabhi notesheets
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "All notesheets fetched successfully",
+      data: notesheets
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+export const getRecentApprovalFlow = async (req, res) => {
+  try {
+    const empId = Number(req.params.empId);
+
+    if (!empId) {
+      return res.status(400).json({
+        success: false,
+        message: "empId param is required"
+      });
+    }
+
+    // Find most recent notesheet for this employee
+    const recentNotesheet = await Notesheet.findOne({ emp_id: empId })
+      .sort({ createdAt: -1 });
+
+    if (!recentNotesheet) {
+      return res.status(404).json({
+        success: false,
+        message: "No notesheet found for this employee"
+      });
+    }
+
+    // Get approval flow for that notesheet
+    const approvalFlow = await NotesheetFlow.find({ note_id: recentNotesheet.note_id })
+      .sort({ step_order: 1 }); // assuming you have step_order field
+
+  return res.status(200).json({
+  success: true,
+  message: "Approval flow fetched successfully",
+  data: approvalFlow.map(flow => ({
+    authority: flow.authority,
+    role: flow.role,          //  add role field
+    status: flow.status.toLowerCase(), // approved/rejected/pending
+    time: flow.updatedAt,     //  rename timestamp → time
+    comment: flow.comment     //  add comment field
+  }))
+});
+
   } catch (error) {
     return res.status(500).json({
       success: false,
