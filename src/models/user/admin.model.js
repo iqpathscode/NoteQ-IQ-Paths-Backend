@@ -29,7 +29,14 @@ const adminSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
       unique: true
-    }
+    },
+    password:{
+      type: String,
+      required:true
+    },
+    is_active: { type: Boolean, default: true }, last_login: { type: Date, default: null },
+    is_admin: { type: Boolean, default: false }
+
   },
   {
     timestamps: true

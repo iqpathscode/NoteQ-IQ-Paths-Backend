@@ -9,11 +9,10 @@ export const signup = async (req, res) => {
       designation,
       mobile_number,
       email,
-      password,
       dept_id,
       role_id
     } = req.body;
-    console.log(req.body);
+
     // check existing user
     const existingUser = await Employee.findOne({
       $or: [{ email }, { mobile_number }]
@@ -26,9 +25,10 @@ export const signup = async (req, res) => {
       });
     }
 
-    // hash password
+    //  Default password set by admin
+    const defaultPassword = "iqpaths@123";
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(defaultPassword, salt);
 
     const employee = await Employee.create({
       emp_id,
@@ -43,10 +43,11 @@ export const signup = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Signup successful',
+      message: 'User created successfully with default password',
       data: {
         emp_id: employee.emp_id,
-        email: employee.email
+        email: employee.email,
+        defaultPassword // optional: show admin what password was set
       }
     });
   } catch (error) {
@@ -54,7 +55,6 @@ export const signup = async (req, res) => {
       success: false,
       message: 'Signup failed',
       error: error.message
-      
     });
   }
 };

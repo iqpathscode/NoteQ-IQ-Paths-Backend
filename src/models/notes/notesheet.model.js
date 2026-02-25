@@ -36,9 +36,14 @@ const notesheetSchema = new mongoose.Schema(
       default: 'PENDING'
     },
 
-    forward_to: {
-      type: Number, // next emp_id / role_id
-      default: null
+   forward_to_emp_id: {
+     type: Number, 
+     default: null 
+    }, 
+    
+    forward_to_role_id: { 
+      type: Number, 
+      default: null 
     },
 
     attachment: {
@@ -47,20 +52,26 @@ const notesheetSchema = new mongoose.Schema(
     },
 
     mode: {
-      type: Number, // 0 = offline, 1 = online
+      type: Number, // 0 = Direct, 1 = chain
       enum: [0, 1],
-      default: 0
+      default: 1
     },
 
     level: {
       type: Number,
-      default: 1
-    }
+      default: 0
+    },
+
+    created_by: { type: Number }, 
+    updated_by: { type: Number }
   },
   {
     timestamps: true
   }
 );
+
+// Indexes for fast lookup 
+notesheetSchema.index({ dept_id: 1, status: 1 }); notesheetSchema.index({ note_id: 1, level: 1 });
 
 const Notesheet = mongoose.model('Notesheet', notesheetSchema);
 export default Notesheet;

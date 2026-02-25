@@ -19,7 +19,11 @@ const roleSchema = new mongoose.Schema(
     },
     dept_id: {
       type: Number,
-      required: true
+      default: null
+    },
+    power_id: {
+      type: Number,
+      required:true
     }
   },
   {
@@ -27,11 +31,11 @@ const roleSchema = new mongoose.Schema(
   }
 );
 
-// Same role name not allowed in same department
-roleSchema.index(
-  { role_name: 1, dept_id: 1 },
-  { unique: true }
-);
+// Prevent duplicate role names in same department 
+roleSchema.index({ role_name: 1, dept_id: 1 }, { unique: true }); 
+
+// Fast lookup for approvers 
+roleSchema.index({ dept_id: 1, power_id: 1 });
 
 const Role = mongoose.model('Role', roleSchema);
 export default Role;

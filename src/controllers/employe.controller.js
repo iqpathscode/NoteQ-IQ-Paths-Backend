@@ -1,6 +1,7 @@
 import Employee from "../models/user/employee.model.js";
 import Department from "../models/office/department.model.js";
 import Notesheet from "../models/notes/notesheet.model.js";
+import Role from "../models/userPowers/role.model.js";
 
 const employeeDetailsPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -159,3 +160,105 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
     });
   }
 };
+
+// Assign Role to Faculty
+export const assignRoleToFaculty = async (req, res) => {
+  try {
+    const { emp_id, role_id } = req.body;
+
+    //  Validate input
+    if (!emp_id || !role_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID and Role ID are required",
+      });
+    }
+
+    //  Verify employee exists
+    const employee = await Employee.findOne({ emp_id });
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    //  Verify role exists
+    const roleExists = await Role.findOne({ role_id });
+    if (!roleExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Role not found",
+      });
+    }
+
+    //  Assign role
+    employee.role_id = role_id;
+    await employee.save();
+
+    return res.json({
+      success: true,
+      message: "Role assigned to faculty successfully!",
+      data: employee,
+    });
+  } catch (error) {
+    console.error("Assign Role Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+// Update Role of Faculty
+export const updateRoleOfFaculty = async (req, res) => {
+  try {
+    const { emp_id, role_id } = req.body;
+
+    //  Validate input
+    if (!emp_id || !role_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID and Role ID are required",
+      });
+    }
+
+    //  Verify employee exists
+    const employee = await Employee.findOne({ emp_id });
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    //  Verify role exists
+    const roleExists = await Role.findOne({ role_id });
+    if (!roleExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Role not found",
+      });
+    }
+
+    //  Update role
+    employee.role_id = role_id;
+    await employee.save();
+
+    return res.json({
+      success: true,
+      message: "Role updated successfully!",
+      data: employee,
+    });
+  } catch (error) {
+    console.error("Update Role Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+

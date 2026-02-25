@@ -1,13 +1,15 @@
-import  Department  from "../models/office/department.model.js";
+import Department from "../models/office/department.model.js";
 import { Counter } from "../models/counter/counter.model.js";
-import  School  from "../models/office/school.model.js";
+import School from "../models/office/school.model.js";
 
 export const createDepartment = async (req, res) => {
   try {
-    const { dept_name, school_id } = req.body;
+    let { dept_name, school_id } = req.body;
 
-    // 1. Validate input
-    if (!dept_name || dept_name.trim() === "") {
+    dept_name = dept_name?.trim();
+
+    //  Validate input
+    if (!dept_name) {
       return res.status(400).json({
         success: false,
         message: "Department name is required",
@@ -21,7 +23,7 @@ export const createDepartment = async (req, res) => {
       });
     }
 
-    // 2. Check if school exists (CRITICAL)
+    //  Check if school exists
     const schoolExists = await School.findOne({ school_id });
     if (!schoolExists) {
       return res.status(404).json({
@@ -30,9 +32,9 @@ export const createDepartment = async (req, res) => {
       });
     }
 
-    // 3. Prevent duplicate department in same school
+    //  Case-insensitive duplicate check in same school
     const existingDept = await Department.findOne({
-      dept_name,
+      dept_name: { $regex: new RegExp(`^${dept_name}$`, "i") },
       school_id,
     });
 
@@ -43,21 +45,20 @@ export const createDepartment = async (req, res) => {
       });
     }
 
-    // 4. Get next dept_id (atomic)
+    //  Auto-increment dept_id
     const counter = await Counter.findOneAndUpdate(
       { name: "dept_id" },
       { $inc: { seq: 1 } },
       { new: true, upsert: true }
     );
 
-    // 5. Create department
+    //  Create department
     const department = await Department.create({
       dept_id: counter.seq,
       dept_name,
       school_id,
     });
 
-    // 6. Respond
     return res.status(201).json({
       success: true,
       message: "Department created successfully",
@@ -65,10 +66,38 @@ export const createDepartment = async (req, res) => {
     });
 
   } catch (error) {
+    console.error("Create Department Error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message,
+    });
+  }
+};
+
+export const getAllDepartments = async (req, res) => {
+  try {
+    const { school_id } = req.query;
+
+    let filter = {};
+    if (school_id) {
+      filter.school_id = school_id;
+    }
+
+    const departments = await Department.find(filter)
+      .sort({ dept_name: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: departments.length,
+      data: departments,
+    });
+
+  } catch (error) {
+    console.error("Get Departments Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching departments",
     });
   }
 };
