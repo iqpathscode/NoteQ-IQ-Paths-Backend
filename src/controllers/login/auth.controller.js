@@ -142,7 +142,30 @@ export const changePassword = async (req, res) => {
     });
   }
 };
+export const getMe = async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+    if (!employee) {
+      return res.status(404).json({ success: false, message: "Employee not found" });
+    }
 
+    const rolePower = await Power.findOne({ power_id: employee.role_id });
+
+    res.json({
+      success: true,
+      user: {
+        emp_id: employee.emp_id,
+        role_id: employee.role_id,
+        dept_id: employee.dept_id,
+        isAdmin: false,
+        canReceiveNotesheet: rolePower?.canReceiveNotesheet || false
+      }
+    });
+  } catch (error) {
+    console.error("Error in getMe:", error.message);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
 export const createUserByAdmin = async (req, res) => {
   try {
     const { emp_name, designation, mobile_number, email, dept_id, role_id } = req.body;

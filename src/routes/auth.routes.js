@@ -3,7 +3,7 @@ import express from 'express';
 // Admin Controller
 import { createAdmin } from '../controllers/admin.controller.js';
 // Auth Controllers
-import { login, changePassword, createUserByAdmin } from '../controllers/login/auth.controller.js';
+import { login, changePassword, getMe, createUserByAdmin } from '../controllers/login/auth.controller.js';
 import { signup } from '../controllers/signup/auth.controller.js';
 // School & Department Controllers
 import { createSchool, getAllSchools } from '../controllers/school.controller.js';
@@ -36,17 +36,7 @@ router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
 router.post("/login", login);
 router.post("/signup", signup);
 router.put("/change-password", authenticate, changePassword);
-router.get("/me", authenticate, (req, res) => {
-  res.json({
-    success: true,
-    user: {
-      emp_id: req.user.emp_id || null,
-      role_id: req.user.role_id || null,
-      dept_id: req.user.dept_id || null,
-      isAdmin: req.user.isAdmin || false
-    }
-  });
-});
+router.get("/me", authenticate, getMe);
 
 // upload
 router.post("/upload", upload.single("file"), uploadAttachment);
@@ -73,16 +63,25 @@ router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
 
 // Employees
-router.get("/employees", authenticate, authorizeRoles(2, 3), getEmployeesWithDetails); 
-router.get("/employee/:empId", authenticate, authorizeRoles(1, 2, 3), getEmployeeDetailsById);
-router.get("/employee/:empId/notesheets/summary", authenticate, authorizeRoles(1), getEmployeeNotesheetSummary);
+// router.get("/employees", authenticate, authorizeRoles(2, 3), getEmployeesWithDetails); 
+// router.get("/employee/:empId", authenticate, authorizeRoles(1, 2, 3), getEmployeeDetailsById);
+// router.get("/employee/:empId/notesheets/summary", authenticate, authorizeRoles(1), getEmployeeNotesheetSummary);
+router.get("/employees", authenticate, getEmployeesWithDetails); 
+router.get("/employee/:empId", authenticate, getEmployeeDetailsById);
+router.get("/employee/:empId/notesheets/summary", authenticate, getEmployeeNotesheetSummary);
+
 
 // Notesheets
-router.post("/notesheet", authenticate, authorizeRoles(1), createNotesheet);
+// router.post("/notesheet", authenticate, authorizeRoles(1), createNotesheet);
+// router.get("/notesheets/all", authenticate, isAdmin, getAllNotesheets);
+// router.get("/notesheets", authenticate, authorizeRoles(1, 2), getNotesheetsForEmployee);
+// router.get("/notesheets/:noteId", authenticate, authorizeRoles(1, 2), getNotesheetById);
+// router.get("/employee/:empId/notesheets/recent/approval-flow", authenticate, authorizeRoles(1), getRecentApprovalFlow);
+router.post("/notesheet", authenticate, createNotesheet);
 router.get("/notesheets/all", authenticate, isAdmin, getAllNotesheets);
-router.get("/notesheets", authenticate, authorizeRoles(1, 2), getNotesheetsForEmployee);
-router.get("/notesheets/:noteId", authenticate, authorizeRoles(1, 2), getNotesheetById);
-router.get("/employee/:empId/notesheets/recent/approval-flow", authenticate, authorizeRoles(1), getRecentApprovalFlow);
+router.get("/notesheets", authenticate, getNotesheetsForEmployee);
+router.get("/notesheets/:noteId", authenticate, getNotesheetById);
+router.get("/employee/:empId/notesheets/recent/approval-flow", authenticate, getRecentApprovalFlow);
 
 // Notification
 router.post("/notifications", authenticate, authorizeRoles(1, 2), createNotification); 
