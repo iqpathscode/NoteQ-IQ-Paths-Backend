@@ -144,23 +144,38 @@ export const changePassword = async (req, res) => {
 };
 export const getMe = async (req, res) => {
   try {
-    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
-    if (!employee) {
-      return res.status(404).json({ success: false, message: "Employee not found" });
-    }
+    let userData;
 
-    const rolePower = await Power.findOne({ power_id: employee.role_id });
-
-    res.json({
-      success: true,
-      user: {
+    if (req.user.isAdmin) {
+      // Admin table se fetch karo
+      const admin = await Admin.findOne({ admin_id: req.user.admin_id });
+      if (!admin) {
+        return res.status(404).json({ success: false, message: "Admin not found" });
+      }
+      userData = {
+        emp_id: admin.admin_id,
+        role_id: "ADMIN",
+        dept_id: null,
+        isAdmin: true,
+        canReceiveNotesheet: true // Admin ke liye hamesha true
+      };
+    } else {
+      // Employee table se fetch karo
+      const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+      if (!employee) {
+        return res.status(404).json({ success: false, message: "Employee not found" });
+      }
+      const rolePower = await Power.findOne({ power_id: employee.role_id });
+      userData = {
         emp_id: employee.emp_id,
         role_id: employee.role_id,
         dept_id: employee.dept_id,
         isAdmin: false,
         canReceiveNotesheet: rolePower?.canReceiveNotesheet || false
-      }
-    });
+      };
+    }
+
+    res.json({ success: true, user: userData });
   } catch (error) {
     console.error("Error in getMe:", error.message);
     res.status(500).json({ success: false, message: "Internal server error" });
