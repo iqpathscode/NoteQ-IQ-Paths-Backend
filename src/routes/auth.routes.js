@@ -5,10 +5,10 @@ import { createAdmin } from '../controllers/admin.controller.js';
 // Auth Controllers
 import { login, changePassword, createUserByAdmin } from '../controllers/login/auth.controller.js';
 import { signup } from '../controllers/signup/auth.controller.js';
-// School & Department Controllers
-import { createSchool, getAllSchools } from '../controllers/school.controller.js';
-import { createDepartment, getAllDepartments } from '../controllers/department.controller.js';
-// createnote controller
+import { createSchool, getSchools } from '../controllers/school.controller.js';
+import { createDepartment, getDepartments } from '../controllers/department.controller.js';
+import { createPowerLevel, getRoles } from '../controllers/role.controller.js';
+import { createPower, getPowers } from '../controllers/power.controller.js';
 import { createNotesheet } from '../controllers/createNote.controller.js';
 // Role Controllers
 import { createPowerLevel, getAllPowerLevels, assignPowerToRole, assignDeptToRole, updateDeptOfRole } from '../controllers/role.controller.js';
@@ -29,64 +29,21 @@ import { createNotification, getNotifications, deleteNotification } from '../con
 
 const router = express.Router();
 
-// Admin
-router.post("/admin", createAdmin);
-// Auth & User Management
-router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
-router.post("/login", login);
-router.post("/signup", signup);
-router.put("/change-password", authenticate, changePassword);
-router.get("/me", authenticate, (req, res) => {
-  res.json({
-    success: true,
-    user: {
-      emp_id: req.user.emp_id || null,
-      role_id: req.user.role_id || null,
-      dept_id: req.user.dept_id || null,
-      isAdmin: req.user.isAdmin || false
-    }
-  });
-});
-
-// upload
-router.post("/upload", upload.single("file"), uploadAttachment);
-
-// School & Department
-router.post("/school", authenticate, isAdmin, createSchool);
-router.get("/school", authenticate, getAllSchools);
-router.post("/department", authenticate, isAdmin, createDepartment);
-router.get("/department", authenticate, getAllDepartments);
-
-// Role & Power
-router.post("/power-level", authenticate, isAdmin, createPowerLevel);
-router.get("/power-level", authenticate, getAllPowerLevels);
-router.post("/power", authenticate, isAdmin, createPower);
-router.get("/power", authenticate, getAllPowers);
-
-// Assign & Update APIs (for AssignManage.jsx)
-router.post("/assign-power", authenticate, isAdmin, assignPowerToRole);
-router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);
-router.post("/assign-dept-role", authenticate, isAdmin, assignDeptToRole);
-
-router.put("/update-role", authenticate, isAdmin, updateRoleOfFaculty);
-router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
-router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
-
-// Employees
-router.get("/employees", authenticate, authorizeRoles(2, 3), getEmployeesWithDetails); 
-router.get("/employee/:empId", authenticate, authorizeRoles(1, 2, 3), getEmployeeDetailsById);
-router.get("/employee/:empId/notesheets/summary", authenticate, authorizeRoles(1), getEmployeeNotesheetSummary);
-
-// Notesheets
-router.post("/notesheet", authenticate, authorizeRoles(1), createNotesheet);
-router.get("/notesheets/all", authenticate, isAdmin, getAllNotesheets);
-router.get("/notesheets", authenticate, authorizeRoles(1, 2), getNotesheetsForEmployee);
-router.get("/notesheets/:noteId", authenticate, authorizeRoles(1, 2), getNotesheetById);
-router.get("/employee/:empId/notesheets/recent/approval-flow", authenticate, authorizeRoles(1), getRecentApprovalFlow);
-
-// Notification
-router.post("/notifications", authenticate, authorizeRoles(1, 2), createNotification); 
-router.get("/notifications", authenticate, authorizeRoles(1, 2), getNotifications); 
-router.delete("/notifications/:id", authenticate, authorizeRoles(2), deleteNotification);
+router.post('/signup', signup);
+router.post('/login', login);
+router.post('/school', createSchool);
+router.get('/schools', getSchools);
+router.post('/department', createDepartment);
+router.get('/departments', getDepartments);
+router.post('/power-level', createPowerLevel);
+router.get('/roles', getRoles);
+router.post('/power', createPower);
+router.get('/powers', getPowers);
+router.post('/notesheet', createNotesheet);
+router.get('/employees', getEmployeesWithDetails);
+router.get('/employee/:empId', getEmployeeDetailsById);
+router.get('/employee/:empId/notesheets/summary', getEmployeeNotesheetSummary);
+router.get('/notesheets', getNotesheetsForEmployee);
+router.get('/notesheets/:noteId', getNotesheetById);
 
 export default router;

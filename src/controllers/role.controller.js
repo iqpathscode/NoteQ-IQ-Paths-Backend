@@ -1,8 +1,76 @@
 // controllers/role.controller.js
 import Role from "../models/userPowers/role.model.js";
 import { Counter } from "../models/counter/counter.model.js";
-import Department from "../models/office/department.model.js";
+import  Department  from "../models/office/department.model.js";
 import Power from "../models/userPowers/power.model.js";
+
+const roleListPipeline = (matchStage = null) => {
+  const pipeline = [];
+
+  if (matchStage) {
+    pipeline.push(matchStage);
+  }
+
+  pipeline.push(
+    {
+      $lookup: {
+        from: Department.collection.name,
+        localField: "dept_id",
+        foreignField: "dept_id",
+        as: "department",
+      },
+    },
+    {
+      $lookup: {
+        from: Power.collection.name,
+        let: { rolePowerLevel: "$power_level" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$power_rank", "$$rolePowerLevel"] },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              power_id: 1,
+              power_name: 1,
+              power_rank: 1,
+              power_type: 1,
+            },
+          },
+        ],
+        as: "power",
+      },
+    },
+    {
+      $addFields: {
+        dept_name: { $arrayElemAt: ["$department.dept_name", 0] },
+        power_id: { $arrayElemAt: ["$power.power_id", 0] },
+        power_name: { $arrayElemAt: ["$power.power_name", 0] },
+        power_type: { $arrayElemAt: ["$power.power_type", 0] },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        role_id: 1,
+        role_name: 1,
+        power_level: 1,
+        dept_id: 1,
+        dept_name: 1,
+        power_id: 1,
+        power_name: 1,
+        power_type: 1,
+      },
+    },
+    {
+      $sort: { role_name: 1 },
+    }
+  );
+
+  return pipeline;
+};
 
 export const createPowerLevel = async (req, res) => {
   try {
@@ -63,6 +131,51 @@ export const createPowerLevel = async (req, res) => {
   } catch (error) {
     console.error("Create Role Error:", error);
     return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+export const getRoles = async (req, res) => {
+  try {
+    const search = req.query.search?.trim();
+    const rawDeptId = req.query.deptId;
+    const rawPowerLevel = req.query.powerLevel;
+    const deptId = rawDeptId !== undefined && rawDeptId !== "" ? Number(rawDeptId) : null;
+    const powerLevel =
+      rawPowerLevel !== undefined && rawPowerLevel !== ""
+        ? Number(rawPowerLevel)
+        : null;
+    const matchFilters = {};
+
+    if (search) {
+      matchFilters.role_name = { $regex: search, $options: "i" };
+    }
+
+    if (deptId) {
+      matchFilters.dept_id = deptId;
+    }
+
+    if (powerLevel || powerLevel === 0) {
+      matchFilters.power_level = powerLevel;
+    }
+
+    const matchStage =
+      Object.keys(matchFilters).length > 0
+        ? { $match: matchFilters }
+        : null;
+
+    const roles = await Role.aggregate(roleListPipeline(matchStage));
+
+    return res.status(200).json({
+      success: true,
+      message: "Roles fetched successfully",
+      data: roles,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 

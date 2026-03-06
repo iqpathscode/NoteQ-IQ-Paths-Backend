@@ -3,6 +3,31 @@ import Power from "../models/userPowers/power.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 import Employee from "../models/user/employee.model.js"; // ensure correct path
 
+const powerListPipeline = (matchStage = null) => {
+  const pipeline = [];
+
+  if (matchStage) {
+    pipeline.push(matchStage);
+  }
+
+  pipeline.push(
+    {
+      $project: {
+        _id: 0,
+        power_id: 1,
+        power_name: 1,
+        power_rank: 1,
+        power_type: 1,
+      },
+    },
+    {
+      $sort: { power_rank: 1, power_id: 1 },
+    }
+  );
+
+  return pipeline;
+};
+
 export const createPower = async (req, res) => {
   try {
     let { power_name, power_rank, power_type, canReceiveNotesheet } = req.body;
@@ -132,6 +157,33 @@ export const updatePowerOfFaculty = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Power Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+export const getPowers = async (req, res) => {
+  try {
+    const search = req.query.search?.trim();
+    const matchStage = search
+      ? {
+          $match: {
+            power_name: { $regex: search, $options: "i" },
+          },
+        }
+      : null;
+
+    const powers = await Power.aggregate(powerListPipeline(matchStage));
+
+    return res.status(200).json({
+      success: true,
+      message: "Powers fetched successfully",
+      data: powers,
+    });
+  } catch (error) {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
