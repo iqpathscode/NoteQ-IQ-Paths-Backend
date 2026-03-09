@@ -68,78 +68,6 @@ export const notesheetViewPipeline = (matchStage = null) => {
   return pipeline;
 };
 
-export const getNotesheetsForEmployee = async (req, res) => {
-  try {
-    const empId = Number(req.query.empId);
-    const status = req.query.status; // optional filter
-
-    if (!empId) {
-      return res.status(400).json({
-        success: false,
-        message: "empId query param is required"
-      });
-    }
-
-    const matchStage = { emp_id: empId };
-    if (status) matchStage.status = status; //  filter by status
-
-    const notesheets = await Notesheet.aggregate(
-      notesheetViewPipeline({ $match: matchStage })
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Notesheets fetched successfully",
-      data: notesheets
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message
-    });
-  }
-};
-
-
-export const getNotesheetById = async (req, res) => {
-  try {
-    const noteId = Number(req.params.noteId);
-
-    if (!noteId) {
-      return res.status(400).json({
-        success: false,
-        message: "noteId is required"
-      });
-    }
-
-    const results = await Notesheet.aggregate(
-      notesheetViewPipeline({ $match: { note_id: noteId } })
-    );
-
-    const notesheet = results[0];
-
-    if (!notesheet) {
-      return res.status(404).json({
-        success: false,
-        message: "Notesheet not found"
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Notesheet fetched successfully",
-      data: notesheet
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message
-    });
-  }
-};
-
 export const getAllNotesheets = async (req, res) => {
   try {
     const notesheets = await Notesheet.aggregate(
@@ -160,49 +88,172 @@ export const getAllNotesheets = async (req, res) => {
   }
 };
 
-export const getRecentApprovalFlow = async (req, res) => {
+export const getNotesheetsForEmployee = async (req, res) => {
   try {
-    const empId = Number(req.params.empId);
+    const empId = Number(req.query.empId);
+    const status = req.query.status;
 
     if (!empId) {
       return res.status(400).json({
         success: false,
-        message: "empId param is required"
+        message: "empId query param is required"
       });
     }
 
-    // Find most recent notesheet for this employee
-    const recentNotesheet = await Notesheet.findOne({ emp_id: empId })
-      .sort({ createdAt: -1 });
+    let query = { emp_id: empId };
 
-    if (!recentNotesheet) {
-      return res.status(404).json({
-        success: false,
-        message: "No notesheet found for this employee"
-      });
+    if (status) {
+      query.status = status;
     }
 
-    // Get approval flow for that notesheet
-    const approvalFlow = await NotesheetFlow.find({ note_id: recentNotesheet.note_id })
-      .sort({ step_order: 1 }); // assuming you have step_order field
+    const notesheets = await Notesheet.find(query).sort({ createdAt: -1 });
 
-  return res.status(200).json({
-  success: true,
-  message: "Approval flow fetched successfully",
-  data: approvalFlow.map(flow => ({
-    authority: flow.authority,
-    role: flow.role,          //  add role field
-    status: flow.status.toLowerCase(), // approved/rejected/pending
-    time: flow.updatedAt,     //  rename timestamp → time
-    comment: flow.comment     //  add comment field
-  }))
-});
+    return res.status(200).json({
+      success: true,
+      data: notesheets
+    });
 
   } catch (error) {
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+
+  }
+};
+export const getNotesheetById = async (req, res) => {
+  try {
+    const noteId = Number(req.params.noteId);
+
+    const notesheet = await Notesheet.aggregate([
+      { $match: { note_id: noteId } },
+
+      // Submitted by lookup
+      {
+        $lookup: {
+          from: "employees",
+          localField: "emp_id",
+          foreignField: "emp_id",
+          as: "submittedByEmp"
+        }
+      },
+
+      // Submitted to lookup (forward_to_emp_id)
+      {
+        $lookup: {
+          from: "employees",
+          localField: "forward_to_emp_id",
+          foreignField: "emp_id",
+          as: "submittedToEmp"
+        }
+      },
+
+      {
+        $addFields: {
+          submittedBy: { $arrayElemAt: ["$submittedByEmp.emp_name", 0] },
+          submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] }
+        }
+      },
+
+      {
+        $project: {
+          _id: 0,
+          id: { $toString: "$note_id" },
+          note_id: 1,
+          title: "$subject",
+          date: "$createdAt",
+          status: 1,
+          description: 1,
+          attachment: 1,
+          submittedBy: 1,
+          submittedTo: 1,
+          emp_id: 1,
+          dept_id: 1,
+          forward_to_emp_id: 1
+        }
+      }
+    ]);
+
+    if (!notesheet || notesheet.length === 0)
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
+
+    return res.status(200).json({ success: true, data: notesheet[0] });
+
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+export const getApprovalFlow = async (req, res) => {
+  try {
+    const noteId = Number(req.params.noteId);
+
+    const flow = await NotesheetFlow.aggregate([
+      {
+        $match: { note_id: noteId }
+      },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "from_emp_id",
+          foreignField: "emp_id",
+          as: "fromEmployee"
+        }
+      },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "to_emp_id",
+          foreignField: "emp_id",
+          as: "toEmployee"
+        }
+      },
+
+      {
+        $addFields: {
+          from_name: { $arrayElemAt: ["$fromEmployee.emp_name", 0] },
+          to_name: { $arrayElemAt: ["$toEmployee.emp_name", 0] }
+        }
+      },
+
+      {
+        $project: {
+          _id: 0,
+          note_id: 1,
+          level: 1,
+          action: 1,
+          remark: 1,
+          final_status: 1,
+          createdAt: 1,
+
+          from_emp_id: 1,
+          from_name: 1,
+
+          to_emp_id: 1,
+          to_name: 1
+        }
+      },
+
+      {
+        $sort: { level: 1 }
+      }
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: flow
+    });
+
+  } catch (error) {
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message
     });
+
   }
 };
