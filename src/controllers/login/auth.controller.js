@@ -60,16 +60,16 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = jwt.sign(
-      {
-        emp_id: user.emp_id,
-        role_id: user.role_id || 0,
-        dept_id: user.dept_id || 0,
-        isAdmin: false
-      },
-      env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN }
-    );
+   const token = jwt.sign(
+{
+emp_id: user.emp_id,
+role_id: user.active_role?.role_id || 0,
+dept_id: user.dept_id || 0,
+isAdmin: false
+},
+env.JWT_SECRET,
+{ expiresIn: env.JWT_EXPIRES_IN }
+);
 
     user.last_login = new Date();
     await user.save();
@@ -144,43 +144,66 @@ export const changePassword = async (req, res) => {
 };
 export const getMe = async (req, res) => {
   try {
-    let userData;
-
+    // Agar user admin hai
     if (req.user.isAdmin) {
-      // Admin table se fetch karo
       const admin = await Admin.findOne({ admin_id: req.user.admin_id });
+
       if (!admin) {
-        return res.status(404).json({ success: false, message: "Admin not found" });
+        return res.status(404).json({
+          success: false,
+          message: "Admin not found"
+        });
       }
-      userData = {
-        emp_id: admin.admin_id,
-        role_id: "ADMIN",
-        dept_id: null,
-        isAdmin: true,
-        canReceiveNotesheet: true // Admin ke liye hamesha true
-      };
-    } else {
-      // Employee table se fetch karo
-      const employee = await Employee.findOne({ emp_id: req.user.emp_id });
-      if (!employee) {
-        return res.status(404).json({ success: false, message: "Employee not found" });
-      }
-      const rolePower = await Power.findOne({ power_id: employee.role_id });
-      userData = {
-        emp_id: employee.emp_id,
-        role_id: employee.role_id,
-        dept_id: employee.dept_id,
-        isAdmin: false,
-        canReceiveNotesheet: rolePower?.canReceiveNotesheet || false
-      };
+
+      return res.json({
+        success: true,
+        user: {
+          admin_id: admin.admin_id,
+          username: admin.username,
+          isAdmin: true,
+          roles: [],              // Admin ke liye roles optional
+          active_role: null,
+          canReceiveNotesheet: false
+        }
+      });
     }
 
-    res.json({ success: true, user: userData });
+    // Agar normal employee hai
+    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found"
+      });
+    }
+
+    const rolePower = await Power.findOne({
+      power_id: employee.active_role?.role_id || employee.role_id
+    });
+
+    res.json({
+      success: true,
+      user: {
+        emp_id: employee.emp_id,
+        dept_id: employee.dept_id,
+        isAdmin: false,
+        roles: employee.roles || [],
+        active_role: employee.active_role,
+        canReceiveNotesheet: rolePower?.canReceiveNotesheet || false
+      }
+    });
+
   } catch (error) {
     console.error("Error in getMe:", error.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
   }
 };
+;
+
 export const createUserByAdmin = async (req, res) => {
   try {
     const { emp_name, designation, mobile_number, email, dept_id, role_id } = req.body;
