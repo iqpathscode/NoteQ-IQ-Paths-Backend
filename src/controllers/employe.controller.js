@@ -166,7 +166,6 @@ export const assignRoleToFaculty = async (req, res) => {
   try {
     const { emp_id, role_id } = req.body;
 
-    //  Validate input
     if (!emp_id || !role_id) {
       return res.status(400).json({
         success: false,
@@ -174,7 +173,6 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
-    //  Verify employee exists
     const employee = await Employee.findOne({ emp_id });
     if (!employee) {
       return res.status(404).json({
@@ -183,7 +181,6 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
-    //  Verify role exists
     const roleExists = await Role.findOne({ role_id });
     if (!roleExists) {
       return res.status(404).json({
@@ -192,13 +189,33 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
-    //  Assign role
-    employee.role_id = role_id;
-    await employee.save();
+    employee.roles = employee.roles || [];
+
+    const alreadyHasRole = employee.roles.some(
+      (r) => r.role_id === role_id
+    );
+
+    if (!alreadyHasRole) {
+      const newRole = {
+        role_id,
+        role_name: roleExists.role_name,
+      };
+
+      employee.roles.push(newRole);
+
+      // first role -> set active role
+      if (!employee.active_role || !employee.active_role.role_id) {
+        employee.active_role = newRole;
+      }
+
+      await employee.save();
+    }
 
     return res.json({
       success: true,
-      message: "Role assigned to faculty successfully!",
+      message: alreadyHasRole
+        ? "Role already assigned!"
+        : "Role assigned successfully!",
       data: employee,
     });
   } catch (error) {
@@ -214,18 +231,17 @@ export const assignRoleToFaculty = async (req, res) => {
 // Update Role of Faculty
 export const updateRoleOfFaculty = async (req, res) => {
   try {
-    const { emp_id, role_id } = req.body;
+    const { emp_id, role_id, newRoleName } = req.body;
 
-    //  Validate input
-    if (!emp_id || !role_id) {
+    if (!emp_id || !role_id || !newRoleName) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID and Role ID are required",
+        message: "Employee ID, Role ID and newRoleName are required",
       });
     }
 
-    //  Verify employee exists
     const employee = await Employee.findOne({ emp_id });
+
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -233,17 +249,36 @@ export const updateRoleOfFaculty = async (req, res) => {
       });
     }
 
-    //  Verify role exists
-    const roleExists = await Role.findOne({ role_id });
-    if (!roleExists) {
+    let roleUpdated = false;
+
+    employee.roles = employee.roles.map((role) => {
+      if (role.role_id === role_id) {
+        roleUpdated = true;
+
+        // update active role also
+        if (
+          employee.active_role &&
+          employee.active_role.role_id === role_id
+        ) {
+          employee.active_role.role_name = newRoleName;
+        }
+
+        return {
+          role_id,
+          role_name: newRoleName,
+        };
+      }
+
+      return role;
+    });
+
+    if (!roleUpdated) {
       return res.status(404).json({
         success: false,
-        message: "Role not found",
+        message: "Role not found in employee",
       });
     }
 
-    //  Update role
-    employee.role_id = role_id;
     await employee.save();
 
     return res.json({
@@ -260,5 +295,52 @@ export const updateRoleOfFaculty = async (req, res) => {
     });
   }
 };
+export const switchEmployeeRole = async (req, res) => {
+  try {
 
+    const { role_id } = req.body;
+    const empId = req.user.emp_id;
 
+    if (!role_id) {
+      return res.status(400).json({
+        success: false,
+        message: "role_id is required"
+      });
+    }
+
+    const employee = await Employee.findOne({ emp_id: empId });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found"
+      });
+    }
+
+    const role = employee.roles.find(r => r.role_id === role_id);
+
+    if (!role) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not assigned this role"
+      });
+    }
+
+    // save full object
+    employee.active_role = role;
+
+    await employee.save();
+
+    res.json({
+      success: true,
+      message: "Role switched successfully",
+      active_role: role
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};

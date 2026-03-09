@@ -60,16 +60,16 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = jwt.sign(
-      {
-        emp_id: user.emp_id,
-        role_id: user.role_id || 0,
-        dept_id: user.dept_id || 0,
-        isAdmin: false
-      },
-      env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN }
-    );
+   const token = jwt.sign(
+{
+emp_id: user.emp_id,
+role_id: user.active_role?.role_id || 0,
+dept_id: user.dept_id || 0,
+isAdmin: false
+},
+env.JWT_SECRET,
+{ expiresIn: env.JWT_EXPIRES_IN }
+);
 
     user.last_login = new Date();
     await user.save();
@@ -142,6 +142,67 @@ export const changePassword = async (req, res) => {
     });
   }
 };
+export const getMe = async (req, res) => {
+  try {
+    // Agar user admin hai
+    if (req.user.isAdmin) {
+      const admin = await Admin.findOne({ admin_id: req.user.admin_id });
+
+      if (!admin) {
+        return res.status(404).json({
+          success: false,
+          message: "Admin not found"
+        });
+      }
+
+      return res.json({
+        success: true,
+        user: {
+          admin_id: admin.admin_id,
+          username: admin.username,
+          isAdmin: true,
+          roles: [],              // Admin ke liye roles optional
+          active_role: null,
+          canReceiveNotesheet: false
+        }
+      });
+    }
+
+    // Agar normal employee hai
+    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found"
+      });
+    }
+
+    const rolePower = await Power.findOne({
+      power_id: employee.active_role?.role_id || employee.role_id
+    });
+
+    res.json({
+      success: true,
+      user: {
+        emp_id: employee.emp_id,
+        dept_id: employee.dept_id,
+        isAdmin: false,
+        roles: employee.roles || [],
+        active_role: employee.active_role,
+        canReceiveNotesheet: rolePower?.canReceiveNotesheet || false
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in getMe:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+;
 
 export const createUserByAdmin = async (req, res) => {
   try {
