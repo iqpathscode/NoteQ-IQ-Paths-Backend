@@ -1,6 +1,7 @@
 import Notesheet from "../models/notes/notesheet.model.js";
 import Employee from "../models/user/employee.model.js";
-import NotesheetFlow from "../models/notes/notesheetFlow.model.js"; // import added
+import NotesheetFlow from "../models/notes/notesheetFlow.model.js"; 
+import Role from "../models/userPowers/role.model.js";
 
 export const notesheetViewPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -106,22 +107,93 @@ export const getNotesheetsForEmployee = async (req, res) => {
       query.status = status;
     }
 
-    const notesheets = await Notesheet.find(query).sort({ createdAt: -1 });
+    //  Get notesheets
+    const notesheets = await Notesheet.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!notesheets.length) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    //  Collect all ids
+    const empIds = new Set();
+    const roleIds = new Set();
+
+    notesheets.forEach(n => {
+      empIds.add(n.emp_id);
+
+      if (n.updated_by) empIds.add(n.updated_by);
+      if (n.forward_to_role_id) roleIds.add(n.forward_to_role_id);
+    });
+
+    //  Fetch employees
+    const employees = await Employee.find({
+      emp_id: { $in: [...empIds] }
+    }).lean();
+
+    const employeeMap = {};
+    employees.forEach(e => {
+      employeeMap[e.emp_id] = e;
+    });
+
+    //  Fetch roles
+    const roles = await Role.find({
+      role_id: { $in: [...roleIds] }
+    }).lean();
+
+    const roleMap = {};
+    roles.forEach(r => {
+      roleMap[r.role_id] = r;
+    });
+
+    //  Format data
+    const formatted = notesheets.map(n => {
+
+      const employee = employeeMap[n.emp_id];
+      const role = roleMap[n.forward_to_role_id];
+
+      let submittedTo = "Completed";
+
+      if (n.forward_to_role_id) {
+        submittedTo = role?.role_name || "Unknown";
+      }
+
+      if (n.status === "APPROVED" && n.updated_by) {
+        const approver = employeeMap[n.updated_by];
+        const approverRole =
+          approver?.active_role?.role_name ||
+          approver?.designation ||
+          "";
+
+        submittedTo = `Approved by ${approver?.emp_name || "Unknown"} (${approverRole})`;
+      }
+
+      return {
+        ...n,
+        submittedBy: employee?.emp_name || "Unknown",
+        submittedTo
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      data: notesheets
+      data: formatted
     });
 
   } catch (error) {
+    console.error("Error fetching notesheets:", error);
 
     return res.status(500).json({
       success: false,
       message: "Internal server error"
     });
-
   }
 };
+
 export const getNotesheetById = async (req, res) => {
   try {
     const noteId = Number(req.params.noteId);
@@ -255,5 +327,67 @@ export const getApprovalFlow = async (req, res) => {
       error: error.message
     });
 
+  }
+};
+
+export const getRecentNotesheets = async (req, res) => {
+  try {
+    const user = req.user;
+
+    const recentNotes = await Notesheet.aggregate([
+      {
+        $match: {
+          $or: [
+            { created_by: user.emp_id },                   // created by user
+            { $and: [{ forward_to_role_id: user.role_id }, { status: "PENDING" }] },  // pending for user
+            { $and: [{ updated_by: user.emp_id }, { status: { $ne: "PENDING" } }] }  // processed by user
+          ]
+        }
+      },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "created_by",
+          foreignField: "emp_id",
+          as: "creator"
+        }
+      },
+
+      {
+        $addFields: {
+          created_by_name: { $arrayElemAt: ["$creator.emp_name", 0] }
+        }
+      },
+
+      {
+        $project: {
+          _id: 0,
+          note_id: 1,
+          subject: 1,
+          status: 1,
+          createdAt: 1,
+          created_by: 1,
+          created_by_name: 1,
+          forward_to_role_id: 1,
+          forward_to_dept_id: 1
+        }
+      },
+
+      { $sort: { createdAt: -1 } },
+      { $limit: 5 }
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: recentNotes
+    });
+
+  } catch (error) {
+    console.error("Recent Notesheets Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
   }
 };

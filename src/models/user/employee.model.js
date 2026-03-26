@@ -1,5 +1,15 @@
 import mongoose from "mongoose";
 
+//  Role subdocument schema (mirror of Role model fields)
+const RoleSubSchema = new mongoose.Schema({
+  role_id: { type: Number, required: true },
+  role_name: { type: String, required: true },
+  dept_id: { type: Number },
+  power_level: { type: Number },
+  power_id: { type: Number },
+  canReceiveNotesheet: { type: Boolean, default: false }
+}, { _id: false });
+
 const employeeSchema = new mongoose.Schema(
   {
     emp_id: { type: Number, required: true, unique: true },
@@ -10,22 +20,14 @@ const employeeSchema = new mongoose.Schema(
     password: { type: String, required: true },
     is_active: { type: Boolean, default: true },
     last_login: { type: Date, default: null },
-    canReceiveNotesheet: { type: Boolean, default: false },
 
     dept_id: { type: Number, required: true },
 
-    roles: [
-      {
-        role_id: { type: Number, required: true },
-        role_name: { type: String, required: true },
-        _id: false
-      }
-    ],
+    // roles array with full schema
+    roles: [RoleSubSchema],
 
-    active_role: {
-      role_id: { type: Number, default: null },
-      role_name: { type: String, default: null },
-    },
+    // active_role with full schema
+    active_role: RoleSubSchema,
 
     assigned_dept_id: { type: Number },
   },
@@ -35,5 +37,4 @@ const employeeSchema = new mongoose.Schema(
 employeeSchema.index({ dept_id: 1, "roles.role_id": 1 });
 
 const Employee = mongoose.model("Employee", employeeSchema);
-
 export default Employee;

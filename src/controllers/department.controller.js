@@ -101,3 +101,43 @@ export const getAllDepartments = async (req, res) => {
     });
   }
 };
+
+export const deleteDepartment = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Department ID is required",
+      });
+    }
+
+    // Check if department exists
+    const department = await Department.findOne({ dept_id: id });
+
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found",
+      });
+    }
+
+    // Delete
+    await Department.deleteOne({ dept_id: id });
+
+    return res.status(200).json({
+      success: true,
+      message: "Department deleted successfully",
+    });
+
+  } catch (error) {
+    console.error("Delete Department Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error deleting department",
+      error: error.message,
+    });
+  }
+};
