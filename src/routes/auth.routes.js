@@ -14,29 +14,34 @@ import { signup } from "../controllers/signup/auth.controller.js";
 import {
   createSchool,
   getAllSchools,
+  deleteSchool,
 } from "../controllers/school.controller.js";
 import {
   createDepartment,
   getAllDepartments,
+  deleteDepartment,
 } from "../controllers/department.controller.js";
 // createnote controller
 import {
   createNotesheet,
   getEligibleRoles,
+  forwardChainOnly,
 } from "../controllers/createNote.controller.js";
 // Role Controllers
 import {
-  createPowerLevel,
-  getAllPowerLevels,
+  createRole,
+  getAllRoles,
   assignPowerToRole,
   assignDeptToRole,
   updateDeptOfRole,
+  deleteRole, 
 } from "../controllers/role.controller.js";
 // Power Controllers
 import {
   createPower,
   getAllPowers,
   updatePowerOfFaculty,
+  deletePower,
 } from "../controllers/power.controller.js";
 // Employee Controllers
 import {
@@ -53,6 +58,7 @@ import {
   getNotesheetsForEmployee,
   getAllNotesheets,
   getApprovalFlow,
+  getRecentNotesheets,
 } from "../controllers/notesheet.controller.js";
 // Middleware
 import {
@@ -71,11 +77,13 @@ import {
 } from "../controllers/notification.controller.js";
 
 import {
-  approveNotesheet,
+  approveNotesheetDirect,
+  approveNotesheetChain,
   rejectNotesheet,
   sendQuery,
   replyQuery,
   getReceivedNotesheets,
+  getQueriesByNoteId,
 } from "../controllers/notesheetAction.controller.js";
 
 const router = express.Router();
@@ -97,19 +105,23 @@ router.post("/upload", upload.single("file"), uploadAttachment);
 // ---------------- SCHOOL ----------------
 router.post("/school", authenticate, isAdmin, createSchool);
 router.get("/school", authenticate, getAllSchools);
+router.delete("/school/:id", deleteSchool);
 
 // ---------------- DEPARTMENT ----------------
 router.post("/department", authenticate, isAdmin, createDepartment);
 router.get("/department", authenticate, getAllDepartments);
+router.delete("/department/:id", deleteDepartment);
 
 // ---------------- POWER ----------------
 router.post("/power", authenticate, isAdmin, createPower);
 router.get("/power", authenticate, getAllPowers);
+router.delete("/power/:id", deletePower);
 
 // ---------------- ROLE ----------------
-router.post("/power-level", authenticate, isAdmin, createPowerLevel);
-router.get("/power-level", authenticate, getAllPowerLevels);
+router.post("/role", authenticate, isAdmin, createRole);
+router.get("/role", authenticate, getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
+router.delete("/role/:id", deleteRole);
 
 // Assignments
 router.post("/assign-power", authenticate, isAdmin, assignPowerToRole);
@@ -134,35 +146,34 @@ router.get(
 // ---------------- NOTESHEET ----------------
 router.post("/notesheet", authenticate, createNotesheet);
 router.get("/notesheets/all", authenticate, isAdmin, getAllNotesheets);
-// employee notesheets
-router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
-// received notesheets (important: before :noteId)
+// static routes
+router.get("/notesheets/recent", authenticate, getRecentNotesheets);
 router.get("/notesheets/received", authenticate, getReceivedNotesheets);
-// notesheet details
+router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
+// nested routes
+router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
+// dynamic routes last
 router.get("/notesheets/:noteId", authenticate, getNotesheetById);
 
 // ---------------- NOTESHEET ACTIONS ----------------
-// approve
-router.put("/notesheets/:noteId/approve", authenticate, approveNotesheet);
+// approve direct
+router.put("/notesheets/:noteId/approve-Direct", authenticate, approveNotesheetDirect);
+// approve chain
+router.put(
+  "/notesheets/:noteId/approve-chain",
+  authenticate,
+  approveNotesheetChain
+);
+// forward chain only
+router.put("/notesheets/forward", authenticate, forwardChainOnly);
 // reject
 router.put("/notesheets/:noteId/reject", authenticate, rejectNotesheet);
 // send query
 router.put("/notesheets/:noteId/query", authenticate, sendQuery);
 // reply query
 router.put("/notesheets/:noteId/reply-query", authenticate, replyQuery);
-// approval flow
-router.get(
-  "/notesheets/:noteId/approval-flow",
-  authenticate,
-  getApprovalFlow,
-);
-
-// Approval Flow
-router.get(
-  "/notesheets/:noteId/approval-flow",
-  authenticate,
-  getApprovalFlow,
-);
+// get queries by noteId
+router.get("/notesheets/:noteId/queries", authenticate, getQueriesByNoteId);
 
 // ---------------- NOTIFICATIONS ----------------
 router.post(

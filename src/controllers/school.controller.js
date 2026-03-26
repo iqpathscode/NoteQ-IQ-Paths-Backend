@@ -1,5 +1,6 @@
 import School from "../models/office/school.model.js";
 import { Counter } from "../models/counter/counter.model.js";
+import Department from "../models/office/department.model.js";
 
 export const createSchool = async (req, res) => {
   try {
@@ -70,6 +71,56 @@ export const getAllSchools = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Error fetching schools",
+    });
+  }
+};
+
+export const deleteSchool = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "School ID is required",
+      });
+    }
+
+    // Check if school exists
+    const school = await School.findOne({ school_id: id });
+
+    if (!school) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
+    // IMPORTANT: check if departments exist under this school
+    const hasDepartments = await Department.findOne({ school_id: id });
+
+    if (hasDepartments) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete school. Departments exist under this school.",
+      });
+    }
+
+    // Delete
+    await School.deleteOne({ school_id: id });
+
+    return res.status(200).json({
+      success: true,
+      message: "School deleted successfully",
+    });
+
+  } catch (error) {
+    console.error("Delete School Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error deleting school",
+      error: error.message,
     });
   }
 };
