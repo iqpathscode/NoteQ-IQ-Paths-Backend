@@ -30,7 +30,7 @@ const powerListPipeline = (matchStage = null) => {
 
 export const createPower = async (req, res) => {
   try {
-    let { power_name, power_rank, power_type, canReceiveNotesheet } = req.body;
+    let { power_name, power_level, power_type, canReceiveNotesheet } = req.body;
 
     // Trim values
     power_name = power_name?.trim();
@@ -75,9 +75,9 @@ export const createPower = async (req, res) => {
     const power = await Power.create({
       power_id: counter.seq,
       power_name,
-      power_rank: power_rank ?? 0,
+      power_level: power_level ?? 0,
       power_type,
-      canReceiveNotesheet: canReceiveNotesheet ?? false // 👈 added
+      canReceiveNotesheet: canReceiveNotesheet ?? false 
     });
 
     return res.status(201).json({
@@ -98,7 +98,7 @@ export const createPower = async (req, res) => {
 
 export const getAllPowers = async (req, res) => {
   try {
-    const powers = await Power.find().sort({ power_rank: 1 });
+    const powers = await Power.find().sort({ power_level: 1 });
 
     return res.status(200).json({
       success: true,
@@ -115,78 +115,92 @@ export const getAllPowers = async (req, res) => {
 };
 
 
-// Update Power of Faculty
+// Update Power of Faculty for specific role
 export const updatePowerOfFaculty = async (req, res) => {
   try {
-    const { emp_id, power_id } = req.body;
+    const { emp_id, role_id, power_id } = req.body;
 
-    //  Validate input
-    if (!emp_id || !power_id) {
+    if (!emp_id || !role_id || !power_id) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID and Power ID are required",
+        message: "Employee ID, Role ID, and Power ID are required",
       });
     }
 
-    //  Verify employee exists
     const employee = await Employee.findOne({ emp_id });
     if (!employee) {
-      return res.status(404).json({
+      return res.status(404).json({ success: false, message: "Employee not found" });
+    }
+
+    const role = employee.roles.find((r) => r.role_id === Number(role_id));
+    if (!role) {
+      return res.status(404).json({ success: false, message: "Role not selected or not found" });
+    }
+
+    // Verify power exists
+    const powerExists = await Power.findOne({ power_id: Number(power_id) });
+    if (!powerExists) {
+      return res.status(404).json({ success: false, message: "Power not found" });
+    }
+
+    // Update power for selected role
+    role.power_id = Number(power_id);
+    await employee.save();
+
+    return res.json({ success: true, message: "Power updated successfully!", data: employee });
+  } catch (error) {
+    console.error("Update Power Error:", error);
+    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+export const deletePower = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate
+    if (!id) {
+      return res.status(400).json({
         success: false,
-        message: "Employee not found",
+        message: "Power ID is required",
       });
     }
 
-    //  Verify power exists
-    const powerExists = await Power.findOne({ power_id });
-    if (!powerExists) {
+    // Check if power exists
+    const power = await Power.findOne({ power_id: id });
+
+    if (!power) {
       return res.status(404).json({
         success: false,
         message: "Power not found",
       });
     }
 
-    //  Update employee's power
-    employee.power_id = power_id;
-    await employee.save();
-
-    return res.json({
-      success: true,
-      message: "Power updated successfully!",
-      data: employee,
+    //  Optional but IMPORTANT: check if used in Employee roles
+    const isUsed = await Employee.findOne({
+      "roles.power_id": Number(id),
     });
-  } catch (error) {
-    console.error("Update Power Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
 
-export const getPowers = async (req, res) => {
-  try {
-    const search = req.query.search?.trim();
-    const matchStage = search
-      ? {
-          $match: {
-            power_name: { $regex: search, $options: "i" },
-          },
-        }
-      : null;
+    if (isUsed) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete power. It is assigned to employees.",
+      });
+    }
 
-    const powers = await Power.aggregate(powerListPipeline(matchStage));
+    // Delete
+    await Power.deleteOne({ power_id: id });
 
     return res.status(200).json({
       success: true,
-      message: "Powers fetched successfully",
-      data: powers,
+      message: "Power deleted successfully",
     });
+
   } catch (error) {
+    console.error("Delete Power Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Error deleting power",
       error: error.message,
     });
   }

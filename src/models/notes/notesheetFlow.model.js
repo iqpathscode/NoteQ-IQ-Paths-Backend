@@ -15,21 +15,16 @@ const notesheetFlowSchema = new mongoose.Schema(
     from_role_id: { 
       type: Number
      },
+to_emp_id: { type: Number, default: null }, 
+to_role_id: { type: Number  }, 
+to_dept_id: { type: Number }, 
 
-    to_emp_id: {
-      type: Number,
-      default: null
-    },
-
-    to_role_id: {
-       type: Number 
-      },
 
     action: {
-      type: String,
-      enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED'],
-      required: true
-    },
+  type: String,
+  enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED', 'QUERY', 'QUERY_REPLY'],
+  required: true
+},
 
     remark: {
       type: String,
@@ -43,7 +38,7 @@ const notesheetFlowSchema = new mongoose.Schema(
     },
 
     final_status: { 
-      type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], 
+      type: String, enum: ['PENDING', 'REPLIED', 'APPROVED', 'REJECTED'], 
       default: 'PENDING' }
   },
   {
