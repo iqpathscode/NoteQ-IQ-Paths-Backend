@@ -28,5 +28,8 @@ departmentSchema.index(
   { unique: true }
 );
 
+// Important index
+departmentSchema.index({ school_id: 1 });
+
 const Department = mongoose.model('Department', departmentSchema);
 export default Department;
