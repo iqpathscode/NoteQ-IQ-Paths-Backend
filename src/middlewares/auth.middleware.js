@@ -1,51 +1,77 @@
-// src/middlewares/auth.middleware.js
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env.config.js';
+import jwt from "jsonwebtoken";
+import { env } from "../config/env.config.js";
+import Employee from "../models/user/employee.model.js";
+import Admin from "../models/user/admin.model.js";
 
-// Authenticate user from cookie
-export const authenticate = (req, res, next) => {
+// ================= AUTHENTICATE =================
+export const authenticate = async (req, res, next) => {
   try {
-    const token = req.cookies.token;   // cookie se token uthao
+    const token = req.cookies.token;
 
     if (!token) {
       return res.status(401).json({
         success: false,
-        message: 'Token required'
+        message: "Token required",
       });
     }
 
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    req.user = decoded;     // decoded payload (emp_id, role_id, dept_id, isAdmin)
+
+    // ================= ADMIN =================
+    if (decoded.isAdmin) {
+      const admin = await Admin.findOne({ admin_id: decoded.admin_id });
+
+      if (!admin) {
+        return res.status(404).json({
+          success: false,
+          message: "Admin not found",
+        });
+      }
+
+      req.user = {
+        admin_id: admin.admin_id,
+        isAdmin: true,
+      };
+
+      return next();
+    }
+
+    // ================= EMPLOYEE =================
+    const employee = await Employee.findOne({
+      emp_id: decoded.emp_id,
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    req.user = {
+      emp_id: employee.emp_id,
+      dept_id: employee.dept_id,
+      active_role_id: employee.active_role_id,
+      isAdmin: false,
+    };
+
     next();
   } catch (error) {
-    console.error(" verify error:", error.message);
+    console.error("verify error:", error.message);
     return res.status(401).json({
       success: false,
-      message: 'Invalid or expired token'
+      message: "Invalid or expired token",
     });
   }
 };
 
-// Check if user is Admin
+// ================= ADMIN CHECK =================
 export const isAdmin = (req, res, next) => {
   if (!req.user || !req.user.isAdmin) {
     return res.status(403).json({
       success: false,
-      message: 'Access denied. Admins only.'
+      message: "Access denied. Admins only.",
     });
   }
   next();
-};
-
-// Role-based access check
-export const authorizeRoles = (...roles) => {
-  return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role_id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
-    }
-    next();
-  };
 };

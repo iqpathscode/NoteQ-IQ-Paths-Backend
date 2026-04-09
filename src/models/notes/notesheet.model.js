@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+
 const notesheetSchema = new mongoose.Schema(
   {
     note_id: {
@@ -37,8 +38,8 @@ const notesheetSchema = new mongoose.Schema(
     },
 
     forward_to_emp_id: { type: Number },
-   forward_to_role_id: { type: Number},
-forward_to_dept_id: { type: Number },
+    forward_to_role_id: { type: Number },
+    forward_to_dept_id: { type: Number },
 
     attachment: {
       type: String,
@@ -46,8 +47,8 @@ forward_to_dept_id: { type: Number },
     },
 
     mode: {
-      type: Number, // 1 = Direct, 0 = chain
-      enum: [0, 1],
+      type: Number,
+      enum: [0, 1], // 0 = chain, 1 = direct
       default: 1,
     },
 
@@ -56,15 +57,18 @@ forward_to_dept_id: { type: Number },
       default: 0,
     },
 
-    created_by: { type: Number },
+    // IMPORTANT FIX
+    created_by_emp_id: { type: Number, required: true },
+    created_by_role_id: { type: Number, required: false },
+
     updated_by: { type: Number },
   },
   {
     timestamps: true,
-  },
+  }
 );
 
-// Indexes for fast lookup
+// Indexes
 notesheetSchema.index({ dept_id: 1, status: 1 });
 notesheetSchema.index({ note_id: 1, level: 1 });
 

@@ -19,7 +19,7 @@ export const createPower = async (req, res) => {
     }
 
     // Validate power_type (Enum Safety)
-    const allowedTypes = ["APPROVAL", "FORWARD", "ADMIN"];
+    const allowedTypes = ["APPROVAL", "HIGHER"];
     if (!allowedTypes.includes(power_type)) {
       return res.status(400).json({
         success: false,

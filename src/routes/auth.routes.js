@@ -51,6 +51,7 @@ import {
   assignRoleToFaculty,
   updateRoleOfFaculty,
   switchEmployeeRole,
+  transferRole,
 } from "../controllers/employe.controller.js";
 // Notesheet Controllers
 import {
@@ -59,6 +60,7 @@ import {
   getAllNotesheets,
   getApprovalFlow,
   getRecentNotesheets,
+  getAllNotesheetsByScope,
 } from "../controllers/notesheet.controller.js";
 // Middleware
 import {
@@ -84,6 +86,8 @@ import {
   replyQuery,
   getReceivedNotesheets,
   getQueriesByNoteId,
+  forwardNotesheetDirect,
+  getProcessedNotesheets,
 } from "../controllers/notesheetAction.controller.js";
 
 const router = express.Router();
@@ -119,7 +123,7 @@ router.delete("/power/:id", deletePower);
 
 // ---------------- ROLE ----------------
 router.post("/role", authenticate, isAdmin, createRole);
-router.get("/role", authenticate, getAllRoles);
+router.get("/role", authenticate,  getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
 router.delete("/role/:id", deleteRole);
 
@@ -133,6 +137,7 @@ router.put("/update-role", authenticate, isAdmin, updateRoleOfFaculty);
 router.put("/switch-role", authenticate, switchEmployeeRole);
 router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
+router.put("/transfer-role", authenticate, transferRole);
 
 // ---------------- EMPLOYEES ----------------
 router.get("/employees", authenticate, getEmployeesWithDetails);
@@ -145,13 +150,16 @@ router.get(
 
 // ---------------- NOTESHEET ----------------
 router.post("/notesheet", authenticate, createNotesheet);
-router.get("/notesheets/all", authenticate, isAdmin, getAllNotesheets);
+router.get("/notesheets/all", authenticate, getAllNotesheets);
 // static routes
 router.get("/notesheets/recent", authenticate, getRecentNotesheets);
 router.get("/notesheets/received", authenticate, getReceivedNotesheets);
 router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
+router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
 // nested routes
 router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
+// get processed notesheets
+router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
 // dynamic routes last
 router.get("/notesheets/:noteId", authenticate, getNotesheetById);
 
@@ -166,6 +174,8 @@ router.put(
 );
 // forward chain only
 router.put("/notesheets/forward", authenticate, forwardChainOnly);
+// forward direct
+router.put("/notesheets/:noteId/forward-direct", authenticate, forwardNotesheetDirect);
 // reject
 router.put("/notesheets/:noteId/reject", authenticate, rejectNotesheet);
 // send query
