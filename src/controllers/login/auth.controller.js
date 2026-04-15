@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import Employee from "../../models/user/employee.model.js";
 import { env } from "../../config/env.config.js";
-import { generateEmpId } from "../../utility/generateEmpID.js";
+import { generateEmpId } from "../../utility/generateEmpId.js";
 import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
 import Department from "../../models/office/department.model.js";
