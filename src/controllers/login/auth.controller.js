@@ -92,11 +92,16 @@ export const login = async (req, res) => {
     user.last_login = new Date();
     await user.save();
 
+    // res.cookie("token", token, {
+    //   httpOnly: true,
+    //   secure: false,
+    //   sameSite: "strict",
+    // });
     res.cookie("token", token, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "strict",
-    });
+  httpOnly: true,
+  secure: true,       //  production me MUST
+  sameSite: "none"    //  cross-origin ke liye
+});
 
     const isDefaultPassword = await bcrypt.compare(
       "iqpaths@123",
