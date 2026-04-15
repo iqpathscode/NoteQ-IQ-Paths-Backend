@@ -37,11 +37,17 @@ export const login = async (req, res) => {
       admin.last_login = new Date();
       await admin.save();
 
+      // res.cookie("token", token, {
+      //   httpOnly: true,
+      //   secure: false, // production me HTTPS ke liye true rakho
+      //   sameSite: "strict",
+      // });
+
       res.cookie("token", token, {
-        httpOnly: true,
-        secure: false, // production me HTTPS ke liye true rakho
-        sameSite: "strict",
-      });
+  httpOnly: true,
+  secure: true,       // MUST in production (Render + Vercel)
+  sameSite: "none"    // IMPORTANT for cross-site cookies
+});
 
       return res.status(200).json({
         success: true,
