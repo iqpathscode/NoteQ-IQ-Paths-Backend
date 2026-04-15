@@ -1,59 +1,68 @@
 import express from "express";
 
-// Admin Controller
+// Controllers
 import { createAdmin } from "../controllers/admin.controller.js";
-// Auth Controllers
+
+// Auth
 import {
   login,
   changePassword,
   getMe,
   createUserByAdmin,
 } from "../controllers/login/auth.controller.js";
+
 import { signup } from "../controllers/signup/auth.controller.js";
-// School & Department Controllers
+
+// School & Department
 import {
   createSchool,
   getAllSchools,
   deleteSchool,
 } from "../controllers/school.controller.js";
+
 import {
   createDepartment,
   getAllDepartments,
   deleteDepartment,
 } from "../controllers/department.controller.js";
-// createnote controller
+
+// Notesheet Creation
 import {
   createNotesheet,
   getEligibleRoles,
   forwardChainOnly,
 } from "../controllers/createNote.controller.js";
-// Role Controllers
+
+// Roles
 import {
   createRole,
   getAllRoles,
   assignPowerToRole,
   assignDeptToRole,
   updateDeptOfRole,
-  deleteRole, 
+  deleteRole,
 } from "../controllers/role.controller.js";
-// Power Controllers
+
+// Power
 import {
   createPower,
   getAllPowers,
   updatePowerOfFaculty,
   deletePower,
 } from "../controllers/power.controller.js";
-// Employee Controllers
+
+// Employee
 import {
   getEmployeeDetailsById,
   getEmployeeNotesheetSummary,
   getEmployeesWithDetails,
-  assignRoleToFaculty,
-  updateRoleOfFaculty,
   switchEmployeeRole,
   transferRole,
+  assignRoleToFaculty,
+  updateRoleOfFaculty,
 } from "../controllers/employe.controller.js";
-// Notesheet Controllers
+
+// Notesheet
 import {
   getNotesheetById,
   getNotesheetsForEmployee,
@@ -62,22 +71,8 @@ import {
   getRecentNotesheets,
   getAllNotesheetsByScope,
 } from "../controllers/notesheet.controller.js";
-// Middleware
-import {
-  authenticate,
-  isAdmin,
-} from "../middlewares/auth.middleware.js";
-// upload
-import { upload } from "../utility/cloudinary.js";
-import { uploadAttachment } from "../controllers/upload.controller.js";
 
-// Notification
-import {
-  createNotification,
-  getNotifications,
-  deleteNotification,
-} from "../controllers/notification.controller.js";
-
+// Actions
 import {
   approveNotesheetDirect,
   approveNotesheetChain,
@@ -90,118 +85,199 @@ import {
   getProcessedNotesheets,
 } from "../controllers/notesheetAction.controller.js";
 
+// Upload
+import { upload } from "../utility/cloudinary.js";
+import { uploadAttachment } from "../controllers/upload.controller.js";
+
+// Excel
+import { bulkSignup } from "../controllers/execl.contorller.js";
+import { uploadExcel } from "../utility/excel.js";
+
+// Download
+import {
+  bulkDownload,
+  downloadNotesheet,
+} from "../controllers/downloadNotesheet.js";
+
+// Notifications
+import {
+  createNotification,
+  getNotifications,
+  deleteNotification,
+} from "../controllers/notification.controller.js";
+
+// Middleware
+import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
+
 const router = express.Router();
 
-// ---------------- ADMIN ----------------
+
+// ======================== ADMIN ========================
 router.post("/admin", createAdmin);
 
-// ---------------- AUTH ----------------
+
+// ======================== AUTH ========================
 router.post("/login", login);
 router.post("/signup", signup);
 router.get("/me", authenticate, getMe);
 router.put("/change-password", authenticate, changePassword);
-
 router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
 
-// ---------------- FILE UPLOAD ----------------
+
+// ======================== UPLOAD ========================
 router.post("/upload", upload.single("file"), uploadAttachment);
 
-// ---------------- SCHOOL ----------------
+
+// ======================== SCHOOL ========================
 router.post("/school", authenticate, isAdmin, createSchool);
 router.get("/school", authenticate, getAllSchools);
-router.delete("/school/:id", deleteSchool);
+router.delete("/school/:id", authenticate, isAdmin, deleteSchool);
 
-// ---------------- DEPARTMENT ----------------
+
+// ======================== DEPARTMENT ========================
 router.post("/department", authenticate, isAdmin, createDepartment);
 router.get("/department", authenticate, getAllDepartments);
-router.delete("/department/:id", deleteDepartment);
+router.delete("/department/:id", authenticate, isAdmin, deleteDepartment);
 
-// ---------------- POWER ----------------
+
+// ======================== POWER ========================
 router.post("/power", authenticate, isAdmin, createPower);
 router.get("/power", authenticate, getAllPowers);
-router.delete("/power/:id", deletePower);
+router.put("/power", authenticate, isAdmin, updatePowerOfFaculty);
+router.delete("/power/:id", authenticate, isAdmin, deletePower);
 
-// ---------------- ROLE ----------------
+
+// ======================== ROLE ========================
 router.post("/role", authenticate, isAdmin, createRole);
-router.get("/role", authenticate,  getAllRoles);
+router.get("/role", authenticate, getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
-router.delete("/role/:id", deleteRole);
+router.delete("/role/:id", authenticate, isAdmin, deleteRole);
 
-// Assignments
+// Role Assignments
 router.post("/assign-power", authenticate, isAdmin, assignPowerToRole);
 router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);
 router.post("/assign-dept-role", authenticate, isAdmin, assignDeptToRole);
 
-// Updates
+// Role Updates
 router.put("/update-role", authenticate, isAdmin, updateRoleOfFaculty);
-router.put("/switch-role", authenticate, switchEmployeeRole);
 router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
+router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.put("/transfer-role", authenticate, transferRole);
 
-// ---------------- EMPLOYEES ----------------
+
+// ======================== EMPLOYEES ========================
 router.get("/employees", authenticate, getEmployeesWithDetails);
 router.get("/employee/:empId", authenticate, getEmployeeDetailsById);
 router.get(
   "/employee/:empId/notesheets/summary",
   authenticate,
-  getEmployeeNotesheetSummary,
+  getEmployeeNotesheetSummary
 );
 
-// ---------------- NOTESHEET ----------------
+
+// ======================== NOTESHEET ========================
+
+// Create
 router.post("/notesheet", authenticate, createNotesheet);
-router.get("/notesheets/all", authenticate, getAllNotesheets);
-// static routes
+
+// LIST (clean grouping)
+router.get("/notesheets", authenticate, getAllNotesheets);
 router.get("/notesheets/recent", authenticate, getRecentNotesheets);
 router.get("/notesheets/received", authenticate, getReceivedNotesheets);
 router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
 router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
-// nested routes
-router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
-// get processed notesheets
 router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
-// dynamic routes last
+
+// Nested
+router.get(
+  "/notesheets/:noteId/approval-flow",
+  authenticate,
+  getApprovalFlow
+);
+
+// IMPORTANT: KEEP THIS LAST
 router.get("/notesheets/:noteId", authenticate, getNotesheetById);
 
-// ---------------- NOTESHEET ACTIONS ----------------
-// approve direct
-router.put("/notesheets/:noteId/approve-Direct", authenticate, approveNotesheetDirect);
-// approve chain
+
+// ======================== NOTESHEET ACTIONS ========================
+router.put(
+  "/notesheets/:noteId/approve-direct",
+  authenticate,
+  approveNotesheetDirect
+);
+
 router.put(
   "/notesheets/:noteId/approve-chain",
   authenticate,
   approveNotesheetChain
 );
-// forward chain only
-router.put("/notesheets/forward", authenticate, forwardChainOnly);
-// forward direct
-router.put("/notesheets/:noteId/forward-direct", authenticate, forwardNotesheetDirect);
-// reject
-router.put("/notesheets/:noteId/reject", authenticate, rejectNotesheet);
-// send query
-router.put("/notesheets/:noteId/query", authenticate, sendQuery);
-// reply query
-router.put("/notesheets/:noteId/reply-query", authenticate, replyQuery);
-// get queries by noteId
-router.get("/notesheets/:noteId/queries", authenticate, getQueriesByNoteId);
 
-// ---------------- NOTIFICATIONS ----------------
-router.post(
-  "/notifications",
+router.put(
+  "/notesheets/:noteId/forward-direct",
   authenticate,
-  createNotification,
+  forwardNotesheetDirect
+);
+
+router.put("/notesheets/forward", authenticate, forwardChainOnly);
+
+router.put(
+  "/notesheets/:noteId/reject",
+  authenticate,
+  rejectNotesheet
+);
+
+router.put(
+  "/notesheets/:noteId/query",
+  authenticate,
+  sendQuery
+);
+
+router.put(
+  "/notesheets/:noteId/reply-query",
+  authenticate,
+  replyQuery
 );
 
 router.get(
-  "/notifications",
+  "/notesheets/:noteId/queries",
   authenticate,
-  getNotifications,
+  getQueriesByNoteId
 );
+
+
+// ======================== DOWNLOAD ========================
+router.get(
+  "/notesheets/download/:id",
+  authenticate,
+  downloadNotesheet
+);
+
+router.post(
+  "/notesheets/bulk-download",
+  authenticate,
+  bulkDownload
+);
+
+
+// ======================== NOTIFICATIONS ========================
+router.post("/notifications", authenticate, createNotification);
+
+router.get("/notifications", authenticate, getNotifications);
 
 router.delete(
   "/notifications/:id",
   authenticate,
-  deleteNotification,
+  deleteNotification
 );
+
+
+// ======================== EXCEL ========================
+router.post(
+  "/bulk-upload",
+  uploadExcel.single("file"),
+  bulkSignup
+);
+
 
 export default router;

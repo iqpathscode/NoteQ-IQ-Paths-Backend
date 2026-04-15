@@ -41,6 +41,7 @@ export const notesheetViewPipeline = (matchStage = null) => {
     {
       $addFields: {
         submittedBy: { $arrayElemAt: ["$sender.emp_name", 0] },
+        forward_to_name: { $arrayElemAt: ["$receiver.emp_name", 0] },
         submittedTo: { $arrayElemAt: ["$receiver.emp_name", 0] }
       }
     },
@@ -407,118 +408,69 @@ export const getApprovalFlow = async (req, res) => {
   }
 };
 
-
 export const getRecentNotesheets = async (req, res) => {
   try {
-    const user = req.user;
+    const roleId = req.query.role_id ? Number(req.query.role_id) : null;
+    const empId = req.query.emp_id ? Number(req.query.emp_id) : null;
 
-    console.log("User in recent API:", user); // 🔍 debug
+    //  dono missing → error
+    if (!roleId && !empId) {
+      return res.status(400).json({
+        success: false,
+        message: "Either role_id or emp_id is required",
+      });
+    }
 
-    const recentNotes = await Notesheet.aggregate([
-      {
-        $match: {
-          $or: [
-            //  1. Created by user
-            { created_by: user.empId },  
+    let filter = {};
 
-            //  2. Pending for user's role
-            {
-              $and: [
-                { forward_to_role_id: user.role_id },
-                { status: "PENDING" }
-              ]
-            },
+    //  PRIORITY: role-based
+    if (roleId) {
+      filter.created_by_role_id = roleId;
+    } 
+    //  fallback: employee-based
+    else if (empId) {
+      filter.created_by_emp_id = empId;
+    }
 
-            //  3. Pending for specific employee (important )
-            {
-              $and: [
-                { forward_to_emp_id: user.empId },
-                { status: "PENDING" }
-              ]
-            },
-
-            //  4. Already processed by user
-            {
-              $and: [
-                { updated_by: user.empId },
-                { status: { $ne: "PENDING" }
-                }
-              ]
-            }
-          ]
-        }
-      },
-
-      // Creator details
-      {
-        $lookup: {
-          from: "employees",
-          localField: "created_by",
-          foreignField: "emp_id",
-          as: "creator"
-        }
-      },
-
-      {
-        $addFields: {
-          created_by_name: { $arrayElemAt: ["$creator.emp_name", 0] }
-        }
-      },
-
-      {
-        $project: {
-          _id: 0,
-          note_id: 1,
-          subject: 1,
-          status: 1,
-          createdAt: 1,
-          created_by: 1,
-          created_by_name: 1,
-          forward_to_role_id: 1,
-          forward_to_dept_id: 1,
-          forward_to_emp_id: 1
-        }
-      },
-
-      { $sort: { createdAt: -1 } },
-      { $limit: 5 }
-    ]);
+    const recentNotes = await Notesheet.find(filter)
+  .sort({ createdAt: -1 }) // latest first
+  .limit(5) // optional (performance ke liye)
+  .lean();
+      
 
     return res.status(200).json({
       success: true,
-      data: recentNotes
+      data: recentNotes || [],
     });
 
   } catch (error) {
-    console.error("Recent Notesheets Error:", error);
+    console.error("Recent Notes Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
-
 export const getAllNotesheetsByScope = async (req, res) => {
   try {
+    console.log(" API HIT");
     const { empId, scope } = req.query;
 
     if (!empId) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID is required"
+        message: "Employee ID is required",
       });
     }
 
     const employee = await Employee.findOne({ emp_id: empId });
-
     if (!employee) {
       return res.status(404).json({
         success: false,
-        message: "Employee not found"
+        message: "Employee not found",
       });
     }
 
-    //  FIX: roleId sabse pehle define karo
     const roleId = employee.active_role_id
       ? Number(employee.active_role_id)
       : null;
@@ -527,70 +479,96 @@ export const getAllNotesheetsByScope = async (req, res) => {
       ? await Role.findOne({ role_id: roleId })
       : null;
 
-    const roleDeptIds = activeRole?.dept_ids?.length
-      ? activeRole.dept_ids
-      : [];
+    const roleDeptIds = activeRole?.dept_ids || [];
 
-    //  Allowed scopes
     let allowedScopes = ["MY"];
 
-    if (activeRole) {
-      if (activeRole.view_scope === "ALL") {
-        allowedScopes = ["MY", "DEPARTMENT", "ALL"];
-      } else if (activeRole.view_scope === "DEPARTMENT") {
-        allowedScopes = ["MY", "DEPARTMENT"];
-      }
+    if (activeRole?.view_scope === "ALL") {
+      allowedScopes = ["MY", "DEPARTMENT", "ALL"];
+    } else if (activeRole?.view_scope === "DEPARTMENT") {
+      allowedScopes = ["MY", "DEPARTMENT"];
     }
 
     const appliedScope = allowedScopes.includes(scope) ? scope : "MY";
 
     let filter = {};
 
-    //  MY → ONLY ROLE CREATED
     if (appliedScope === "MY") {
-      if (!roleId) {
-        return res.status(200).json({
-          success: true,
-          count: 0,
-          data: []
-        });
-      }
-
-      filter = {
-        created_by_role_id: roleId
-      };
-    }
-
-    //  DEPARTMENT → ROLE DEPT BASED
-    else if (appliedScope === "DEPARTMENT") {
-      filter = {
-        dept_id: { $in: roleDeptIds }
-      };
-    }
-
-    //  ALL → SAB DIKHEGA
-    else if (appliedScope === "ALL") {
+      filter = roleId
+        ? { created_by_role_id: roleId }
+        : { created_by_emp_id: empId };
+    } else if (appliedScope === "DEPARTMENT") {
+      filter = roleDeptIds.length
+        ? { dept_id: { $in: roleDeptIds } }
+        : { _id: null };
+    } else {
       filter = {};
     }
 
-    console.log(" Applied Scope:", appliedScope);
-    console.log(" Role ID:", roleId);
+    filter.status = { $ne: "APPROVED" };
+
     console.log(" Final Filter:", filter);
 
-    const notesheets = await Notesheet.find(filter).sort({ createdAt: -1 });
+    const notesheets = await Notesheet.find(filter).sort({
+      createdAt: -1,
+    });
+
+    console.log(" Notesheets:", notesheets.length);
+
+    //  STEP 1: sab note_ids nikaalo
+    const noteIds = notesheets.map((n) => n.note_id);
+
+    //  STEP 2: ek hi query me saare flows lao
+    const allFlows = await NotesheetFlow.find({
+      note_id: { $in: noteIds },
+    }).sort({ createdAt: 1 });
+
+    console.log(" All Flows:", allFlows.length);
+
+    //  STEP 3: mapping
+    const processedNotesheets = notesheets.map((note, index) => {
+      console.log(`\n Note ${note.note_id}`);
+
+      // note ka flow filter karo
+      let flow = allFlows.filter(
+        (f) => f.note_id === note.note_id
+      );
+
+      console.log(" Raw Flow from DB:", flow);
+
+      // reject clean
+      flow = flow.filter(
+        (item) =>
+          item.action !== "REJECTED" ||
+          item.final_status === "REJECTED"
+      );
+
+
+      // current step
+      const currentStep = flow.find(
+        (item) => item.final_status === "PENDING"
+      );
+
+
+      return {
+        ...note.toObject(),
+        flow,
+        current_step: currentStep || null,
+      };
+    });
+
 
     return res.status(200).json({
       success: true,
-      count: notesheets.length,
-      data: notesheets
+      count: processedNotesheets.length,
+      data: processedNotesheets,
     });
-
   } catch (error) {
-    console.error("Get Notesheets Error:", error);
+    console.error(" ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };

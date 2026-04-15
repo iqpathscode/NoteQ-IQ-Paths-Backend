@@ -329,3 +329,62 @@ export const createUserByAdmin = async (req, res) => {
     });
   }
 };
+
+export const createUserService = async (data, deptMap) => {
+
+  //  normalize keys
+  const normalizedData = {};
+  Object.keys(data).forEach(key => {
+    const cleanKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+    normalizedData[cleanKey] = data[key];
+  });
+
+  const emp_name = normalizedData.emp_name || normalizedData.employee_name;
+  const designation = normalizedData.designation;
+  const mobile_number = normalizedData.mobile_number;
+  const email = normalizedData.email;
+  const dept_name = normalizedData.dept_name || normalizedData.department;
+
+  //  clean values
+  const empNameClean = emp_name?.toString().trim();
+  const designationClean = designation?.toString().trim();
+  const mobileClean = mobile_number?.toString().trim();
+  const emailClean = email?.toString().trim().toLowerCase();
+  const deptNameClean = dept_name?.toString().trim().toLowerCase();
+
+  if (!empNameClean || !designationClean || !mobileClean || !emailClean || !deptNameClean) {
+    throw new Error("Missing required fields");
+  }
+
+  const dept = deptMap.get(deptNameClean);
+
+  if (!dept) {
+    throw new Error(`Invalid department: ${dept_name}`);
+  }
+
+  const existing = await Employee.findOne({
+    $or: [{ email: emailClean }, { mobile_number: mobileClean }],
+  });
+
+  if (existing) {
+    throw new Error("User already exists");
+  }
+
+  const emp_id = await generateEmpId();
+  const hashedPassword = await bcrypt.hash("iqpaths@123", 10);
+
+  const user = await Employee.create({
+    emp_id,
+    emp_name: empNameClean,
+    designation: designationClean,
+    mobile_number: mobileClean,
+    email: emailClean,
+    dept_id: dept.dept_id,
+    school_id: dept.school_id,
+    password: hashedPassword,
+    role_ids: [],
+    active_role_id: null,
+  });
+
+  return user;
+};
