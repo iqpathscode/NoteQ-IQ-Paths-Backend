@@ -7,10 +7,11 @@ import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
 import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
+// import crypto from "crypto";
 
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe } = req.body;
 
     // Step 1: Check Admin first
     const admin = await Admin.findOne({ email });
@@ -46,7 +47,10 @@ export const login = async (req, res) => {
       res.cookie("token", token, {
   httpOnly: true,
   secure: true,       // MUST in production (Render + Vercel)
-  sameSite: "none"    // IMPORTANT for cross-site cookies
+  sameSite: "none" ,   // IMPORTANT for cross-site cookies
+   maxAge: rememberMe
+      ? 7 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000,
 });
 
       return res.status(200).json({
@@ -399,3 +403,67 @@ export const createUserService = async (data, deptMap) => {
 
   return user;
 };
+
+export const logout = async (req, res) => {
+  try {
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: true, // production me true
+      sameSite: "Strict",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Logout failed",
+    });
+  }
+};
+
+// export const forgotPassword = async (req, res) => {
+//   const { email } = req.body;
+
+//   const user = await Employee.findOne({ email });
+//   if (!user) {
+//     return res.status(404).json({ message: "User not found" });
+//   }
+
+//   const resetToken = crypto.randomBytes(32).toString("hex");
+
+//   user.resetToken = resetToken;
+//   user.resetTokenExpire = Date.now() + 15 * 60 * 1000; // 15 min
+//   await user.save();
+
+//   const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+//   // TODO: send email (nodemailer)
+//   console.log("Reset Link:", resetLink);
+
+//   res.json({ message: "Reset link sent to email" });
+// };
+
+
+// export const resetPassword = async (req, res) => {
+//   const { token, password } = req.body;
+
+//   const user = await Employee.findOne({
+//     resetToken: token,
+//     resetTokenExpire: { $gt: Date.now() },
+//   });
+
+//   if (!user) {
+//     return res.status(400).json({ message: "Invalid or expired token" });
+//   }
+
+//   user.password = password; // bcrypt use karo real project me
+//   user.resetToken = undefined;
+//   user.resetTokenExpire = undefined;
+
+//   await user.save();
+
+//   res.json({ message: "Password updated successfully" });
+// };

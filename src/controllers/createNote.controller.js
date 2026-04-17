@@ -165,6 +165,237 @@ export const createNotesheet = async (req, res) => {
   }
 };
 
+// export const forwardChainOnly = async (req, res) => {
+//   try {
+//     console.log("===== Forward Chain Start =====");
+
+//     const { note_id, forward_to_role, remark } = req.body;
+//     const user = req.user;
+
+//     // HELPER (VERY IMPORTANT)
+//     const ensureCreatedFields = (notesheet, userRoleId) => {
+//       if (!notesheet.created_by_emp_id) {
+//         notesheet.created_by_emp_id = notesheet.emp_id;
+//       }
+
+//       if (!notesheet.created_by_role_id) {
+//         notesheet.created_by_role_id = userRoleId;
+//       }
+//     };
+
+//     // Step 0: Active Role
+//     const userRoleId =
+//       user.active_role_id ||
+//       user.role_id ||
+//       (await Employee.findOne({ emp_id: user.emp_id }))?.active_role_id;
+
+//     if (!userRoleId) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "User role not found",
+//       });
+//     }
+
+//     // Step 1: Fetch notesheet
+//     const notesheet = await Notesheet.findOne({
+//       note_id: Number(note_id),
+//       forward_to_dept_id: Number(user.dept_id),
+//     });
+
+//     if (!notesheet) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Notesheet not found for your department",
+//       });
+//     }
+
+//     if (notesheet.mode !== 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "This is not a chain notesheet",
+//       });
+//     }
+
+    
+//     // Step 2: Fetch role + employee + power
+//     const [employee, role] = await Promise.all([
+//       Employee.findOne({ emp_id: user.emp_id }),
+//       Role.findOne({ role_id: userRoleId }),
+//     ]);
+
+//     if (!role) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Role not found",
+//       });
+//     }
+
+//     const power = await Power.findOne({ power_id: role.power_id });
+
+//     if (!power) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Power not found",
+//       });
+//     }
+
+//     const userPowerLevel = power.power_level;
+//     const userPowerType = power.power_type;
+
+//     // Step 3: Update level
+//     if (!notesheet.level || notesheet.level < userPowerLevel) {
+//       notesheet.level = userPowerLevel;
+//       notesheet.forward_to_role_id = role.role_id;
+
+//       ensureCreatedFields(notesheet, userRoleId); 
+//       await notesheet.save();
+//     }
+
+//     // Step 4: Auto-forward (APPROVAL)
+//     if (!forward_to_role && userPowerType === "APPROVAL") {
+//       const allRoles = await Role.find({
+//         canReceiveNotesheet: true,
+//         dept_ids: user.dept_id,
+//       });
+
+//       const rolesWithPower = await Promise.all(
+//         allRoles.map(async (r) => {
+//           const p = await Power.findOne({ power_id: r.power_id });
+//           return { role: r, power: p };
+//         })
+//       );
+
+//       const nextRoleCandidate = rolesWithPower
+//         .filter(
+//           (rp) =>
+//             rp.power?.power_type === "APPROVAL" &&
+//             rp.power.power_level > notesheet.level
+//         )
+//         .sort((a, b) => a.power.power_level - b.power.power_level)[0];
+
+//       if (nextRoleCandidate) {
+//         const nr = nextRoleCandidate.role;
+//         const np = nextRoleCandidate.power;
+
+//         notesheet.forward_to_role_id = nr.role_id;
+//         notesheet.forward_to_dept_id = user.dept_id;
+//         notesheet.level = np.power_level;
+
+//         ensureCreatedFields(notesheet, userRoleId);
+
+//         await notesheet.save();
+
+//         await NotesheetFlow.create({
+//           note_id: notesheet.note_id,
+//           from_emp_id: user.emp_id,
+//           from_emp_name: employee?.emp_name || "Unknown User",
+//           from_role_id: userRoleId,
+//           from_role_name: role.role_name,
+//           to_emp_id: null,
+//           to_emp_name: null,
+//           to_role_id: nr.role_id,
+//           to_role_name: nr.role_name,
+//           to_dept_id: user.dept_id,
+//           action: "FORWARDED",
+//           remark: remark || null,
+//           level: np.power_level,
+//           final_status: "PENDING",
+//         });
+
+//         return res.json({
+//           success: true,
+//           message: `Auto-forwarded to ${nr.role_name}`,
+//         });
+//       }
+//     }
+
+    
+//     // Step 5: Dropdown
+//     if (!forward_to_role) {
+//       const allRoles = await Role.find({
+//         canReceiveNotesheet: true,
+//         dept_ids: user.dept_id,
+//       });
+
+//       const rolesWithPower = await Promise.all(
+//         allRoles.map(async (r) => {
+//           const p = await Power.findOne({ power_id: r.power_id });
+//           return { role: r, power: p };
+//         })
+//       );
+
+//       const higherRoles = rolesWithPower
+//         .filter((rp) => rp.power?.power_level > notesheet.level)
+//         .sort((a, b) => a.power.power_level - b.power.power_level)
+//         .map((rp) => rp.role);
+
+//       return res.json({
+//         success: true,
+//         isDeanMode: userPowerType !== "APPROVAL",
+//         message: "Select role to forward",
+//         dropdownOptions: higherRoles,
+//       });
+//     }
+
+//     // -------------------------------
+//     // Step 6: Manual forward
+//     // -------------------------------
+//     const nextRole = await Role.findOne({
+//       role_id: forward_to_role,
+//       canReceiveNotesheet: true,
+//     });
+
+//     if (!nextRole) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Target role not found",
+//       });
+//     }
+
+//     const nextPower = await Power.findOne({
+//       power_id: nextRole.power_id,
+//     });
+
+//     notesheet.forward_to_role_id = nextRole.role_id;
+//     notesheet.forward_to_dept_id =
+//       nextRole.dept_ids?.[0] || user.dept_id;
+//     notesheet.level = nextPower?.power_level || notesheet.level;
+
+//     ensureCreatedFields(notesheet, userRoleId);
+
+//     await notesheet.save();
+
+//     await NotesheetFlow.create({
+//       note_id: notesheet.note_id,
+//       from_emp_id: user.emp_id,
+//       from_emp_name: employee?.emp_name || "Unknown User",
+//       from_role_id: userRoleId,
+//       from_role_name: role.role_name,
+//       to_emp_id: null,
+//       to_emp_name: null,
+//       to_role_id: nextRole.role_id,
+//       to_role_name: nextRole.role_name,
+//       to_dept_id: notesheet.forward_to_dept_id,
+//       action: "FORWARDED",
+//       remark: remark || null,
+//       level: nextPower?.power_level || notesheet.level,
+//       final_status: "PENDING",
+//     });
+
+//     return res.json({
+//       success: true,
+//       message: `Forwarded to ${nextRole.role_name}`,
+//     });
+
+//   } catch (error) {
+//     console.error("Forward Chain Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// };
+
 export const forwardChainOnly = async (req, res) => {
   try {
     console.log("===== Forward Chain Start =====");
@@ -172,7 +403,6 @@ export const forwardChainOnly = async (req, res) => {
     const { note_id, forward_to_role, remark } = req.body;
     const user = req.user;
 
-    // HELPER (VERY IMPORTANT)
     const ensureCreatedFields = (notesheet, userRoleId) => {
       if (!notesheet.created_by_emp_id) {
         notesheet.created_by_emp_id = notesheet.emp_id;
@@ -196,16 +426,15 @@ export const forwardChainOnly = async (req, res) => {
       });
     }
 
-    // Step 1: Fetch notesheet
+    // Step 1: FETCH NOTESHEET
     const notesheet = await Notesheet.findOne({
       note_id: Number(note_id),
-      forward_to_dept_id: Number(user.dept_id),
     });
 
     if (!notesheet) {
       return res.status(400).json({
         success: false,
-        message: "Notesheet not found for your department",
+        message: "Notesheet not found",
       });
     }
 
@@ -216,8 +445,7 @@ export const forwardChainOnly = async (req, res) => {
       });
     }
 
-    
-    // Step 2: Fetch role + employee + power
+    // Step 2: role + power
     const [employee, role] = await Promise.all([
       Employee.findOne({ emp_id: user.emp_id }),
       Role.findOne({ role_id: userRoleId }),
@@ -242,88 +470,106 @@ export const forwardChainOnly = async (req, res) => {
     const userPowerLevel = power.power_level;
     const userPowerType = power.power_type;
 
-    // Step 3: Update level
+    // Step 3: update current level
     if (!notesheet.level || notesheet.level < userPowerLevel) {
       notesheet.level = userPowerLevel;
       notesheet.forward_to_role_id = role.role_id;
 
-      ensureCreatedFields(notesheet, userRoleId); 
+      ensureCreatedFields(notesheet, userRoleId);
       await notesheet.save();
     }
 
-    // Step 4: Auto-forward (APPROVAL)
-    if (!forward_to_role && userPowerType === "APPROVAL") {
-      const allRoles = await Role.find({
-        canReceiveNotesheet: true,
-        dept_ids: user.dept_id,
-      });
+    // ======================================================
+    //  STEP 4: AUTO CHAIN LOGIC (MAIN FIX)
+    // ======================================================
 
-      const rolesWithPower = await Promise.all(
-        allRoles.map(async (r) => {
-          const p = await Power.findOne({ power_id: r.power_id });
-          return { role: r, power: p };
-        })
-      );
+    const allRoles = await Role.find({
+      canReceiveNotesheet: true,
+      dept_ids: user.dept_id,
+    });
 
-      const nextRoleCandidate = rolesWithPower
-        .filter(
-          (rp) =>
-            rp.power?.power_type === "APPROVAL" &&
-            rp.power.power_level > notesheet.level
-        )
-        .sort((a, b) => a.power.power_level - b.power.power_level)[0];
+    const rolesWithPower = await Promise.all(
+      allRoles.map(async (r) => {
+        const p = await Power.findOne({ power_id: r.power_id });
+        return { role: r, power: p };
+      })
+    );
 
-      if (nextRoleCandidate) {
-        const nr = nextRoleCandidate.role;
-        const np = nextRoleCandidate.power;
+    const nextAutoRole = rolesWithPower
+      .filter(
+        (rp) =>
+          rp.power?.power_type === "APPROVAL" &&
+          rp.power.power_level > notesheet.level
+      )
+      .sort((a, b) => a.power.power_level - b.power.power_level)[0];
 
-        notesheet.forward_to_role_id = nr.role_id;
-        notesheet.forward_to_dept_id = user.dept_id;
-        notesheet.level = np.power_level;
+   // ======================================================
+//  CASE 1: AUTO FLOW (CHAIN CONTINUOUS)
+// ======================================================
+if (!forward_to_role) {
 
-        ensureCreatedFields(notesheet, userRoleId);
+  let currentNotesheet = notesheet;
+  let nextAutoRole = null;
 
-        await notesheet.save();
+  while (true) {
 
-        await NotesheetFlow.create({
-          note_id: notesheet.note_id,
-          from_emp_id: user.emp_id,
-          from_emp_name: employee?.emp_name || "Unknown User",
-          from_role_id: userRoleId,
-          from_role_name: role.role_name,
-          to_emp_id: null,
-          to_emp_name: null,
-          to_role_id: nr.role_id,
-          to_role_name: nr.role_name,
-          to_dept_id: user.dept_id,
-          action: "FORWARDED",
-          remark: remark || null,
-          level: np.power_level,
-          final_status: "PENDING",
-        });
+    const rolesWithPower = await Promise.all(
+      allRoles.map(async (r) => {
+        const p = await Power.findOne({ power_id: r.power_id });
+        return { role: r, power: p };
+      })
+    );
 
-        return res.json({
-          success: true,
-          message: `Auto-forwarded to ${nr.role_name}`,
-        });
-      }
-    }
+    nextAutoRole = rolesWithPower
+      .filter(
+        (rp) =>
+          rp.power?.power_type === "APPROVAL" &&
+          rp.power.power_level > currentNotesheet.level
+      )
+      .sort((a, b) => a.power.power_level - b.power.power_level)[0];
 
-    
-    // Step 5: Dropdown
+    if (!nextAutoRole) break;
+
+    const nr = nextAutoRole.role;
+    const np = nextAutoRole.power;
+
+    currentNotesheet.forward_to_role_id = nr.role_id;
+    currentNotesheet.forward_to_dept_id = user.dept_id;
+    currentNotesheet.level = np.power_level;
+
+    await currentNotesheet.save();
+
+    await NotesheetFlow.create({
+      note_id: currentNotesheet.note_id,
+      from_emp_id: user.emp_id,
+      from_emp_name: employee?.emp_name || "Unknown User",
+      from_role_id: userRoleId,
+      from_role_name: role.role_name,
+      to_emp_id: null,
+      to_emp_name: null,
+      to_role_id: nr.role_id,
+      to_role_name: nr.role_name,
+      to_dept_id: user.dept_id,
+      action: "FORWARDED",
+      remark: remark || null,
+      level: np.power_level,
+      final_status: "PENDING",
+    });
+
+    // continue loop until no next role
+  }
+
+  return res.json({
+    success: true,
+    mode: "AUTO",
+    message: "Auto chain completed",
+  });
+}
+
+    // ======================================================
+    //  CASE 2: NO AUTO ROLE → MANUAL SELECTION
+    // ======================================================
     if (!forward_to_role) {
-      const allRoles = await Role.find({
-        canReceiveNotesheet: true,
-        dept_ids: user.dept_id,
-      });
-
-      const rolesWithPower = await Promise.all(
-        allRoles.map(async (r) => {
-          const p = await Power.findOne({ power_id: r.power_id });
-          return { role: r, power: p };
-        })
-      );
-
       const higherRoles = rolesWithPower
         .filter((rp) => rp.power?.power_level > notesheet.level)
         .sort((a, b) => a.power.power_level - b.power.power_level)
@@ -331,15 +577,16 @@ export const forwardChainOnly = async (req, res) => {
 
       return res.json({
         success: true,
+        mode: "MANUAL",
         isDeanMode: userPowerType !== "APPROVAL",
-        message: "Select role to forward",
+        message: "Select next role",
         dropdownOptions: higherRoles,
       });
     }
 
-    // -------------------------------
-    // Step 6: Manual forward
-    // -------------------------------
+    // ======================================================
+    //  CASE 3: MANUAL FORWARD
+    // ======================================================
     const nextRole = await Role.findOne({
       role_id: forward_to_role,
       canReceiveNotesheet: true,
@@ -359,10 +606,10 @@ export const forwardChainOnly = async (req, res) => {
     notesheet.forward_to_role_id = nextRole.role_id;
     notesheet.forward_to_dept_id =
       nextRole.dept_ids?.[0] || user.dept_id;
+
     notesheet.level = nextPower?.power_level || notesheet.level;
 
     ensureCreatedFields(notesheet, userRoleId);
-
     await notesheet.save();
 
     await NotesheetFlow.create({
@@ -384,9 +631,9 @@ export const forwardChainOnly = async (req, res) => {
 
     return res.json({
       success: true,
+      mode: "MANUAL_DONE",
       message: `Forwarded to ${nextRole.role_name}`,
     });
-
   } catch (error) {
     console.error("Forward Chain Error:", error);
     return res.status(500).json({
@@ -395,6 +642,7 @@ export const forwardChainOnly = async (req, res) => {
     });
   }
 };
+
 export const getEligibleRoles = async (req, res) => {
   try {
     const { note_id, mode } = req.query;
