@@ -5,6 +5,7 @@ import Department from "../models/office/department.model.js";
 import Notesheet from "../models/notes/notesheet.model.js";
 import Role from "../models/userPowers/role.model.js";
 import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
+import School from "../models/office/school.model.js";
 
 const employeeDetailsPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -430,5 +431,100 @@ export const transferRole = async (req, res) => {
   } catch (err) {
     console.error("transferRole Error:", err);
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+// ================= GET PROFILE =================
+export const getProfile = async (req, res) => {
+  try {
+    const empId = req.user.emp_id;
+
+    const employee = await Employee.findOne({ emp_id: empId }).select("-password");
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    //  manual fetch (NO populate)
+    const department = await Department.findOne({
+      dept_id: employee.dept_id,
+    });
+
+    const school = await School.findOne({
+      school_id: employee.school_id,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...employee.toObject(),
+
+        //  frontend ke liye same structure bana diya
+        department: department
+          ? { name: department.dept_name }
+          : null,
+
+        school: school
+          ? { name: school.school_name }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Profile Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  try {
+    const empId = req.user.emp_id;
+
+    const { email, mobile_number, designation } = req.body;
+
+    const updatedEmployee = await Employee.findOneAndUpdate(
+      { emp_id: empId },
+      {
+        email,
+        mobile_number,
+        designation,
+      },
+      { new: true }
+    ).select("-password");
+
+    //  again manual fetch
+    const department = await Department.findOne({
+      dept_id: updatedEmployee.dept_id,
+    });
+
+    const school = await School.findOne({
+      school_id: updatedEmployee.school_id,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: {
+        ...updatedEmployee.toObject(),
+        department: department
+          ? { name: department.dept_name }
+          : null,
+        school: school
+          ? { name: school.school_name }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Update Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Update failed",
+    });
   }
 };

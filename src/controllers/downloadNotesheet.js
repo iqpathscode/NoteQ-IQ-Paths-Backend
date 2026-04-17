@@ -9,114 +9,12 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 
-// ================= FLOW DATA =================
-// const getApprovalFlowData = async (noteId) => {
-//   return await NotesheetFlow.aggregate([
-//     { $match: { note_id: Number(noteId) } },
-
-//     // FROM EMPLOYEE
-//     {
-//       $lookup: {
-//         from: "employees",
-//         localField: "from_emp_id",
-//         foreignField: "emp_id",
-//         as: "fromEmployee",
-//       },
-//     },
-//     { $unwind: { path: "$fromEmployee", preserveNullAndEmptyArrays: true } },
-
-//     // TO EMPLOYEE
-//     {
-//       $lookup: {
-//         from: "employees",
-//         localField: "to_emp_id",
-//         foreignField: "emp_id",
-//         as: "toEmployee",
-//       },
-//     },
-//     { $unwind: { path: "$toEmployee", preserveNullAndEmptyArrays: true } },
-
-//     // ROLE LOOKUP
-//     {
-//       $lookup: {
-//         from: "roles",
-//         localField: "to_role_id",
-//         foreignField: "role_id",
-//         as: "toRole",
-//       },
-//     },
-//     {
-//       $lookup: {
-//         from: "roles",
-//         localField: "from_role_id",
-//         foreignField: "role_id",
-//         as: "fromRole",
-//       },
-//     },
-
-//     { $unwind: { path: "$toRole", preserveNullAndEmptyArrays: true } },
-//     { $unwind: { path: "$fromRole", preserveNullAndEmptyArrays: true } },
-
-//     // ROLE → EMPLOYEE FALLBACK
-//     {
-//       $lookup: {
-//         from: "employees",
-//         let: { roleId: "$to_role_id" },
-//         pipeline: [
-//           {
-//             $match: {
-//               $expr: { $eq: ["$active_role_id", "$$roleId"] },
-//             },
-//           },
-//         ],
-//         as: "roleEmployee",
-//       },
-//     },
-//     { $unwind: { path: "$roleEmployee", preserveNullAndEmptyArrays: true } },
-
-//     // FINAL FIELDS
-//     {
-//       $addFields: {
-//         from_name: {
-//           $ifNull: ["$from_emp_name", "$fromEmployee.emp_name", "$fromRole.role_name"],
-//         },
-
-//         to_name: {
-//           $ifNull: [
-//             "$to_emp_name",                // BEST (historical)
-//             "$toEmployee.emp_name",        // direct
-//             "$roleEmployee.emp_name",      // fallback
-//             "$toRole.role_name",           // last fallback
-//           ],
-//         },
-
-//         from_role_name: "$fromRole.role_name",
-//         to_role_name: "$toRole.role_name",
-//       },
-//     },
-
-//     {
-//       $project: {
-//         action: 1,
-//         remark: 1,
-//         createdAt: 1,
-//         from_name: 1,
-//         to_name: 1,
-//         from_role_name: 1,
-//         to_role_name: 1,
-//       },
-//     },
-
-//     { $sort: { createdAt: 1 } },
-//   ]);
-// };
-
 
 const getApprovalFlowData = async (noteId) => {
   return await NotesheetFlow.aggregate([
     { $match: { note_id: Number(noteId) } },
 
-    // FROM EMPLOYEE
+    // ================= FROM EMPLOYEE =================
     {
       $lookup: {
         from: "employees",
@@ -127,7 +25,7 @@ const getApprovalFlowData = async (noteId) => {
     },
     { $unwind: { path: "$fromEmployee", preserveNullAndEmptyArrays: true } },
 
-    // TO EMPLOYEE
+    // ================= TO EMPLOYEE =================
     {
       $lookup: {
         from: "employees",
@@ -138,7 +36,7 @@ const getApprovalFlowData = async (noteId) => {
     },
     { $unwind: { path: "$toEmployee", preserveNullAndEmptyArrays: true } },
 
-    // ROLE LOOKUP
+    // ================= ROLE LOOKUPS =================
     {
       $lookup: {
         from: "roles",
@@ -159,29 +57,60 @@ const getApprovalFlowData = async (noteId) => {
     { $unwind: { path: "$toRole", preserveNullAndEmptyArrays: true } },
     { $unwind: { path: "$fromRole", preserveNullAndEmptyArrays: true } },
 
-    // ✅ FINAL FIELDS (NO DUPLICATE ISSUE)
+    // ================= ROLE → EMPLOYEE (FIXED) =================
     {
-      $addFields: {
-        from_name: {
-          $ifNull: [
-            "$from_emp_name",           // stored value (best)
-            "$fromEmployee.emp_name",   // fallback
-            "$fromRole.role_name",      // last fallback
-          ],
+  $lookup: {
+    from: "employees",
+    let: { roleId: "$to_role_id" },
+    pipeline: [
+      {
+        $match: {
+          $expr: { $in: ["$$roleId", "$role_ids"] },
         },
-
-        to_name: {
-          $ifNull: [
-            "$to_emp_name",             // stored value (best)
-            "$toEmployee.emp_name",     // fallback
-            "$toRole.role_name",        // last fallback
-          ],
-        },
-
-        from_role_name: "$fromRole.role_name",
-        to_role_name: "$toRole.role_name",
       },
+      { $sort: { emp_id: 1 } },
+      { $limit: 1 },
+    ],
+    as: "roleEmployee",
+  },
+},
+{ $unwind: { path: "$roleEmployee", preserveNullAndEmptyArrays: true } },
+
+    // ================= FINAL FIELDS =================
+   {
+  $addFields: {
+    from_name: {
+      $ifNull: [
+        "$from_emp_name",
+        "$fromEmployee.emp_name",
+        "$fromRole.role_name",
+      ],
     },
+
+    to_name: {
+      $ifNull: [
+        "$to_emp_name",
+        "$toEmployee.emp_name",
+        "$roleEmployee.emp_name",
+        "$toRole.role_name",
+      ],
+    },
+
+    from_role_name: {
+      $ifNull: [
+        "$fromRole.role_name",
+        "$fromEmployee.active_role_name",
+      ],
+    },
+
+    to_role_name: {
+      $ifNull: [
+        "$toRole.role_name",
+        "$roleEmployee.active_role_name",
+      ],
+    },
+  },
+},
 
     {
       $project: {
@@ -348,7 +277,7 @@ const generatePDFBuffer = async (noteId) => {
 
       // ================= SIGNATURE =================
       const rightX = margin + pageWidth / 2;
-      const lastFlow = flow[flow.length - 1];
+      const lastFlow = flow.length ? flow[flow.length - 1] : null;
 
       doc.font("Helvetica-Bold")
         .text(

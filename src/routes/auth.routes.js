@@ -9,9 +9,13 @@ import {
   changePassword,
   getMe,
   createUserByAdmin,
+  logout,
+  // forgotPassword,
+  // resetPassword,
 } from "../controllers/login/auth.controller.js";
 
-import { signup } from "../controllers/signup/auth.controller.js";
+import { signup, 
+ } from "../controllers/signup/auth.controller.js";
 
 // School & Department
 import {
@@ -60,6 +64,8 @@ import {
   transferRole,
   assignRoleToFaculty,
   updateRoleOfFaculty,
+  getProfile,
+  updateProfile,
 } from "../controllers/employe.controller.js";
 
 // Notesheet
@@ -122,6 +128,10 @@ router.post("/signup", signup);
 router.get("/me", authenticate, getMe);
 router.put("/change-password", authenticate, changePassword);
 router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
+router.post("/logout", authenticate, logout);
+// router.post("/forgot-password", forgotPassword);
+// router.post("/reset-password", resetPassword);
+
 
 
 // ======================== UPLOAD ========================
@@ -164,6 +174,8 @@ router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
 router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.put("/transfer-role", authenticate, transferRole);
+router.get("/profile", authenticate, getProfile);
+router.put("/update-profile", authenticate, updateProfile);
 
 
 // ======================== EMPLOYEES ========================
