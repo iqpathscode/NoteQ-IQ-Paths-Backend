@@ -40,11 +40,20 @@ const employeeSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    resetToken: {
+      type: String,
+      default: null,
+    },
+
+    resetTokenExpiry: {
+      type: Date,
+      default: null,
+    },
 
     // optional (if needed)
     assigned_dept_id: { type: Number },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Indexes

@@ -6,6 +6,7 @@ import Notesheet from "../models/notes/notesheet.model.js";
 import Role from "../models/userPowers/role.model.js";
 import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import School from "../models/office/school.model.js";
+import Admin from "../models/user/admin.model.js";
 
 const employeeDetailsPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -163,6 +164,7 @@ export const assignRoleToFaculty = async (req, res) => {
   try {
     const { emp_id, role_name, dept_id } = req.body;
 
+    // 1. Validate
     if (!emp_id || !role_name) {
       return res.status(400).json({
         success: false,
@@ -170,7 +172,8 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
-    const employee = await Employee.findOne({ emp_id });
+    // 2. Find Employee
+    const employee = await Employee.findOne({ emp_id: Number(emp_id) });
 
     if (!employee) {
       return res.status(404).json({
@@ -179,9 +182,13 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
+    // 3. Find Role (case-insensitive + dept match)
     const roleExists = await Role.findOne({
       role_name: { $regex: new RegExp(`^${role_name}$`, "i") },
-      $or: [{ dept_ids: Number(dept_id) }, { dept_ids: { $size: 0 } }],
+      $or: [
+        { dept_ids: Number(dept_id) },
+        { dept_ids: { $size: 0 } }
+      ],
     });
 
     if (!roleExists) {
@@ -191,47 +198,53 @@ export const assignRoleToFaculty = async (req, res) => {
       });
     }
 
-    //  UNIQUE ROLE FIX (REMOVE FROM ALL FIRST)
-    if (roleExists.is_unique_role) {
-      await Employee.updateMany(
-        { role_ids: roleExists.role_id },
-        {
-          $pull: { role_ids: roleExists.role_id },
-          $unset: { active_role_id: "" },
-        },
-      );
+    const roleId = roleExists.role_id;
+
+    // ✅ 4. STRICT UNIQUE CHECK (MOST IMPORTANT)
+    const roleAlreadyAssigned = await Employee.exists({
+      role_ids: roleId,
+      emp_id: { $ne: Number(emp_id) }, // exclude current employee
+    });
+
+    if (roleAlreadyAssigned) {
+      return res.status(400).json({
+        success: false,
+        message: "This role is already assigned to another employee",
+      });
     }
 
-    //  DUPLICATE CHECK
-    if (employee.role_ids?.includes(roleExists.role_id)) {
+    // ✅ 5. DUPLICATE CHECK (same employee)
+    if (employee.role_ids?.includes(roleId)) {
       return res.status(400).json({
         success: false,
         message: "Employee already has this role",
       });
     }
 
-    //  ASSIGN ROLE
+    // ✅ 6. ASSIGN ROLE
     const updatedEmployee = await Employee.findOneAndUpdate(
       { emp_id: Number(emp_id) },
       {
-        $addToSet: { role_ids: roleExists.role_id }, //  no duplicate
+        $addToSet: { role_ids: roleId },
         $set: {
-          active_role_id: employee.active_role_id || roleExists.role_id,
+          active_role_id: employee.active_role_id || roleId,
         },
       },
-      { new: true },
+      { new: true }
     );
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: `Role "${roleExists.role_name}" assigned successfully`,
       data: updatedEmployee,
     });
+
   } catch (error) {
     console.error("Assign Role Error:", error);
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Error assigning role",
+      error: error.message,
     });
   }
 };
@@ -436,11 +449,87 @@ export const transferRole = async (req, res) => {
 
 
 // ================= GET PROFILE =================
+// export const getProfile = async (req, res) => {
+//   try {
+//     const empId = req.user.emp_id;
+
+//     const employee = await Employee.findOne({ emp_id: empId }).select("-password");
+
+//     if (!employee) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Employee not found",
+//       });
+//     }
+
+//     //  manual fetch (NO populate)
+//     const department = await Department.findOne({
+//       dept_id: employee.dept_id,
+//     });
+
+//     const school = await School.findOne({
+//       school_id: employee.school_id,
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         ...employee.toObject(),
+
+//         //  frontend ke liye same structure bana diya
+//         department: department
+//           ? { name: department.dept_name }
+//           : null,
+
+//         school: school
+//           ? { name: school.school_name }
+//           : null,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Profile Error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Server Error",
+//     });
+//   }
+// };
+
 export const getProfile = async (req, res) => {
   try {
-    const empId = req.user.emp_id;
+    console.log("USER FROM TOKEN:", req.user);
 
-    const employee = await Employee.findOne({ emp_id: empId }).select("-password");
+    // 🟢 ADMIN
+    if (req.user.isAdmin) {
+      const admin = await Admin.findOne({
+        admin_id: req.user.admin_id,
+      }).select("-password");
+
+      if (!admin) {
+        return res.status(404).json({
+          success: false,
+          message: "Admin not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...admin.toObject(),
+
+          // 🔥 ADD THIS (IMPORTANT)
+          name: admin.admin_name,
+
+          department: { name: "All Departments" },
+          school: { name: "All Schools" },
+        },
+      });
+    }
+
+    // 🟢 EMPLOYEE
+    const employee = await Employee.findOne({
+      emp_id: req.user.emp_id,
+    }).select("-password");
 
     if (!employee) {
       return res.status(404).json({
@@ -449,21 +538,23 @@ export const getProfile = async (req, res) => {
       });
     }
 
-    //  manual fetch (NO populate)
-    const department = await Department.findOne({
-      dept_id: employee.dept_id,
-    });
+    const [department, school] = await Promise.all([
+      employee.dept_id
+        ? Department.findOne({ dept_id: employee.dept_id })
+        : null,
+      employee.school_id
+        ? School.findOne({ school_id: employee.school_id })
+        : null,
+    ]);
 
-    const school = await School.findOne({
-      school_id: employee.school_id,
-    });
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
         ...employee.toObject(),
 
-        //  frontend ke liye same structure bana diya
+        // 🔥 ADD THIS (IMPORTANT)
+        name: employee.emp_name,
+
         department: department
           ? { name: department.dept_name }
           : null,
@@ -473,6 +564,7 @@ export const getProfile = async (req, res) => {
           : null,
       },
     });
+
   } catch (error) {
     console.error("Profile Error:", error);
     res.status(500).json({
@@ -484,12 +576,43 @@ export const getProfile = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const empId = req.user.emp_id;
-
     const { email, mobile_number, designation } = req.body;
 
+    // 🟢 ADMIN FLOW
+    if (req.user.isAdmin) {
+      const updatedAdmin = await Admin.findOneAndUpdate(
+        { admin_id: req.user.admin_id },
+        {
+          email,
+          mobile_number,
+          designation,
+        },
+        { new: true }
+      ).select("-password");
+
+      if (!updatedAdmin) {
+        return res.status(404).json({
+          success: false,
+          message: "Admin not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Profile updated successfully",
+        data: {
+          ...updatedAdmin.toObject(),
+
+          // 🔥 Global mapping
+          department: { name: "All Departments" },
+          school: { name: "All Schools" },
+        },
+      });
+    }
+
+    // 🟢 EMPLOYEE FLOW
     const updatedEmployee = await Employee.findOneAndUpdate(
-      { emp_id: empId },
+      { emp_id: req.user.emp_id },
       {
         email,
         mobile_number,
@@ -498,23 +621,33 @@ export const updateProfile = async (req, res) => {
       { new: true }
     ).select("-password");
 
-    //  again manual fetch
-    const department = await Department.findOne({
-      dept_id: updatedEmployee.dept_id,
-    });
+    if (!updatedEmployee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
 
-    const school = await School.findOne({
-      school_id: updatedEmployee.school_id,
-    });
+    // 🔥 Parallel fetch (fast)
+    const [department, school] = await Promise.all([
+      updatedEmployee.dept_id
+        ? Department.findOne({ dept_id: updatedEmployee.dept_id })
+        : null,
+      updatedEmployee.school_id
+        ? School.findOne({ school_id: updatedEmployee.school_id })
+        : null,
+    ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Profile updated successfully",
       data: {
         ...updatedEmployee.toObject(),
+
         department: department
           ? { name: department.dept_name }
           : null,
+
         school: school
           ? { name: school.school_name }
           : null,

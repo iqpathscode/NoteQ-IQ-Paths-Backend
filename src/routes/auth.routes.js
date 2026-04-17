@@ -10,8 +10,8 @@ import {
   getMe,
   createUserByAdmin,
   logout,
-  // forgotPassword,
-  // resetPassword,
+  forgotPassword,
+  resetPassword,
 } from "../controllers/login/auth.controller.js";
 
 import { signup, 
@@ -129,8 +129,8 @@ router.get("/me", authenticate, getMe);
 router.put("/change-password", authenticate, changePassword);
 router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
 router.post("/logout", authenticate, logout);
-// router.post("/forgot-password", forgotPassword);
-// router.post("/reset-password", resetPassword);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password/:token", resetPassword);
 
 
 
