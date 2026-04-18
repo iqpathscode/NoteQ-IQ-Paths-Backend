@@ -3,76 +3,45 @@ import Role from "../models/userPowers/role.model.js";
 import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import Employee from "../models/user/employee.model.js";
 
-// ---------------- GET RECEIVED NOTESHEETS ---------------
 export const getReceivedNotesheets = async (req, res) => {
   try {
-    const user = req.user;
+    const user = await Employee.findOne({ emp_id: req.user.emp_id });
 
-    // console.log("Received notesheet API called");
-    // console.log("req.user:", user);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
 
-    const pendingNotesheets = await Notesheet.find({
+    // ONLY ACTIVE ROLE ( MAIN FIX)
+    const activeRoleId = user.active_role_id;
+
+    const role = await Role.findOne({ role_id: activeRoleId });
+
+    const roleDeptIds = role?.dept_ids?.length
+      ? role.dept_ids
+      : [user.dept_id];
+
+    const notesheets = await Notesheet.find({
       status: "PENDING",
+      forward_to_role_id: activeRoleId, // ONLY ACTIVE ROLE
       $or: [
-        { forward_to_emp_id: user.emp_id },
-        {
-          forward_to_role_id: user.role_id,
-          dept_id: user.dept_id,
-        },
+        { forward_to_dept_id: { $in: roleDeptIds } },
+        { forward_to_dept_id: null },
       ],
     }).sort({ createdAt: -1 });
 
-    const formatted = await Promise.all(
-      pendingNotesheets.map(async (n) => {
-        // Submitted By (Employee Name)
-        const employee = await Employee.findOne({
-          emp_id: Number(n.emp_id),
-        });
-
-        let submittedTo = "Unknown";
-
-        // Pending case → Role name
-        if (n.forward_to_role_id) {
-          const role = await Role.findOne({
-            role_id: Number(n.forward_to_role_id),
-          });
-
-          submittedTo = role?.role_name || "Unknown";
-        }
-
-        // Approved case → Employee name + role
-        if (n.status === "APPROVED" && n.updated_by) {
-          const approver = await Employee.findOne({
-            emp_id: Number(n.updated_by),
-          });
-
-          const approverRole =
-            approver?.active_role?.role_name || approver?.designation || "";
-
-          submittedTo = `Approved by ${approver?.emp_name || "Unknown"} (${approverRole})`;
-        }
-
-        return {
-          ...n._doc,
-          submittedBy: employee?.emp_name || "Unknown",
-          submittedTo,
-        };
-      }),
-    );
-
-    // console.log("Pending notesheets:", formatted.length);
-
-    return res.status(200).json({
+    return res.json({
       success: true,
-      data: formatted,
+      data: notesheets,
     });
-  } catch (error) {
-    // console.error("Error fetching received notesheets:", error);
 
+  } catch (error) {
+    console.error("ERROR ", error);
     return res.status(500).json({
       success: false,
-      message: "Error fetching received notesheets",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -80,10 +49,12 @@ export const getReceivedNotesheets = async (req, res) => {
 export const approveNotesheetDirect = async (req, res) => {
   try {
     const { noteId } = req.params;
-    const { remark, forward_to_role } = req.body;
+    const { remark } = req.body;
     const user = req.user;
 
-    const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
+    const notesheet = await Notesheet.findOne({
+      note_id: Number(noteId),
+    });
 
     if (!notesheet) {
       return res.status(404).json({
@@ -92,12 +63,7 @@ export const approveNotesheetDirect = async (req, res) => {
       });
     }
 
-    // console.log("Notesheet role:", notesheet.forward_to_role_id);
-    // console.log("User role:", user.role_id);
-    // console.log("Notesheet dept:", notesheet.forward_to_dept_id);
-    // console.log("User dept:", user.dept_id);
-
-    //  Only Direct Mode
+    //  Only direct mode
     if (notesheet.mode !== 1) {
       return res.status(400).json({
         success: false,
@@ -105,23 +71,31 @@ export const approveNotesheetDirect = async (req, res) => {
       });
     }
 
-    //  Authorization check
+    // ================= ROLE FIX  =================
+    const userRoleId = user.active_role_id || user.role_id;
+
+    // DEBUG (important)
+    console.log("User Role:", userRoleId);
+    console.log("Notesheet Forward Role:", notesheet.forward_to_role_id);
+
+    // ================= AUTH LOGIC (FIXED) =================
     const roleMatch =
-      Number(notesheet.forward_to_role_id) === Number(user.role_id);
+      Number(notesheet.forward_to_role_id) === Number(userRoleId);
 
     const deptMatch =
       !notesheet.forward_to_dept_id ||
       Number(notesheet.forward_to_dept_id) === Number(user.dept_id);
 
-    const isAuthorized = roleMatch && deptMatch;
-
-    if (!isAuthorized) {
+    //  IMPORTANT CHANGE
+    // direct me sirf role match enough hai
+    if (!roleMatch) {
       return res.status(403).json({
         success: false,
-        message: "You are not authorized",
+        message: "You are not authorized (role mismatch)",
       });
     }
 
+    // ================= STATUS CHECK =================
     if (notesheet.status !== "PENDING") {
       return res.status(400).json({
         success: false,
@@ -129,70 +103,70 @@ export const approveNotesheetDirect = async (req, res) => {
       });
     }
 
-    const role = await Role.findOne({ role_id: user.role_id });
+const [role, employee] = await Promise.all([
+  Role.findOne({ role_id: userRoleId }),
+  Employee.findOne({ emp_id: user.emp_id })
+]);
 
-    // CASE 1: FORWARD
+//  SAFETY FIX BEFORE SAVE
+if (!notesheet.created_by_emp_id) {
+  notesheet.created_by_emp_id = notesheet.emp_id;
+}
 
-    if (forward_to_role) {
-      notesheet.forward_to_role_id = forward_to_role;
-      notesheet.forward_to_dept_id = null; // optional (agar dept-based hai toh set karo)
-      notesheet.updated_by = user.emp_id;
-      notesheet.status = "PENDING";
+if (!notesheet.created_by_role_id) {
+  notesheet.created_by_role_id = notesheet.forward_to_role_id || userRoleId;
+}
+    // ================= APPROVE =================
+notesheet.status = "APPROVED";
+notesheet.forward_to_role_id = null;
+notesheet.forward_to_dept_id = null;
+notesheet.updated_by = user.emp_id;
 
-      await notesheet.save();
+//  FIX
+if (!notesheet.created_by_emp_id) {
+  notesheet.created_by_emp_id = notesheet.emp_id;
+}
 
-      await NotesheetFlow.create({
-        note_id: notesheet.note_id,
-        from_emp_id: user.emp_id,
-        from_role_id: user.role_id,
-        to_role_id: forward_to_role,
-        action: "FORWARDED",
-        remark: remark || null,
-        level: role.power_level,
-        final_status: "PENDING",
-      });
+if (!notesheet.created_by_role_id) {
+  notesheet.created_by_role_id = userRoleId;
+}
 
-      return res.status(200).json({
-        success: true,
-        message: "Notesheet forwarded successfully",
-      });
-    }
+await notesheet.save();
 
-    //  CASE 2: FINAL APPROVE
-    else {
-      notesheet.status = "APPROVED";
-      notesheet.forward_to_role_id = null;
-      notesheet.forward_to_dept_id = null;
-      notesheet.updated_by = user.emp_id;
+    // update previous flow
+    await NotesheetFlow.updateOne(
+      { note_id: notesheet.note_id, final_status: "PENDING" },
+      { $set: { final_status: "APPROVED" } }
+    );
 
-      await notesheet.save();
+    // create new flow
 
-      await NotesheetFlow.updateOne(
-        { note_id: notesheet.note_id, final_status: "PENDING" },
-        { $set: { final_status: "APPROVED" } },
-      );
+await NotesheetFlow.create({
+  note_id: notesheet.note_id,
+  from_emp_id: user.emp_id,
+  from_emp_name: employee?.emp_name || "Unknown User",
+  from_role_id: userRoleId,
+  from_role_name: role?.role_name || "Unknown Role",
+  to_emp_id: null,
+  to_emp_name: null,
+  to_role_id: null,
+  to_role_name: null,
+  action: "APPROVED",
+  remark: remark || null,
+  level: role?.power_level || 1,
+  final_status: "APPROVED",
+});
 
-      await NotesheetFlow.create({
-        note_id: notesheet.note_id,
-        from_emp_id: user.emp_id,
-        from_role_id: user.role_id,
-        action: "APPROVED",
-        remark: remark || null,
-        level: role.power_level,
-        final_status: "APPROVED",
-      });
+    return res.json({
+      success: true,
+      message: "Notesheet approved successfully (Direct)",
+    });
 
-      return res.status(200).json({
-        success: true,
-        message: "Notesheet approved successfully",
-      });
-    }
   } catch (error) {
-    console.error("Approve Notesheet Error:", error);
-
-    return res.status(500).json({
+    console.error("Approve Direct Error:", error);
+    res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Server error",
     });
   }
 };
@@ -205,65 +179,120 @@ export const approveNotesheetChain = async (req, res) => {
 
     const notesheet = await Notesheet.findOne({
       note_id: Number(noteId),
-      forward_to_role_id: user.role_id,
     });
 
     if (!notesheet || notesheet.mode !== 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid chain notesheet",
+        message: "Not a chain notesheet",
       });
     }
 
     if (notesheet.status !== "PENDING") {
       return res.status(400).json({
         success: false,
-        message: "Notesheet already processed",
+        message: "Already processed",
       });
     }
 
-    const role = await Role.findOne({ role_id: user.role_id });
+   const userRoleId = user.active_role_id;
 
-    //  FINAL APPROVE
-    notesheet.status = "APPROVED";
-    notesheet.forward_to_role_id = null;
-    notesheet.forward_to_dept_id = null;
+//  parallel fetch (best)
+const [role, employee] = await Promise.all([
+  Role.findOne({ role_id: userRoleId }),
+  Employee.findOne({ emp_id: user.emp_id })
+]);
 
-    await notesheet.save();
+if (!role) {
+  return res.status(400).json({
+    success: false,
+    message: "Role not found",
+  });
+}
 
-    await NotesheetFlow.create({
-      note_id: notesheet.note_id,
-      from_emp_id: user.emp_id,
-      from_role_id: user.role_id,
-      action: "APPROVED",
-      remark: remark || null,
-      level: role.power_level,
-      final_status: "APPROVED",
-    });
+//  SAFE LEVEL
+const levelValue = role.power_level || notesheet.level || 1;
+
+//  FINAL APPROVE
+notesheet.status = "APPROVED";
+notesheet.forward_to_role_id = null;
+notesheet.forward_to_dept_id = null;
+notesheet.updated_by = user.emp_id;
+
+if (!notesheet.created_by_emp_id) {
+  notesheet.created_by_emp_id = notesheet.emp_id;
+}
+
+if (!notesheet.created_by_role_id) {
+  notesheet.created_by_role_id = userRoleId;
+}
+
+await notesheet.save();
+
+//  UPDATE PREVIOUS FLOW
+await NotesheetFlow.updateOne(
+  { note_id: notesheet.note_id, final_status: "PENDING" },
+  { $set: { final_status: "APPROVED" } }
+);
+
+//  CREATE FLOW (FULL FIX )
+await NotesheetFlow.create({
+  note_id: notesheet.note_id,
+
+  from_emp_id: user.emp_id,
+  from_emp_name: employee?.emp_name || "Unknown User",
+
+  from_role_id: userRoleId,
+  from_role_name: role?.role_name || "Unknown Role",
+
+  to_emp_id: null,
+  to_emp_name: null,
+
+  to_role_id: null,
+  to_role_name: null,
+
+  action: "APPROVED",
+  remark: remark || null,
+
+  level: levelValue,
+  final_status: "APPROVED",
+});
 
     return res.json({
       success: true,
-      message: "Notesheet fully approved",
+      message: "Approved (Chain)",
     });
+
   } catch (error) {
-    console.error(error);
+    console.error("Approve Chain Error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: error.message,
     });
   }
 };
-// ---------------- REJECT NOTESHEET ----------------
 
-export const rejectNotesheet = async (req, res) => {
+export const forwardNotesheetDirect = async (req, res) => {
   try {
-    const { noteId } = req.params; // numeric note_id
-    const { remark } = req.body;
-    const userId = req.user.emp_id;
-    const userRoleId = req.user.role_id;
+    const { noteId } = req.params;
+    const { remark, forward_to_role } = req.body;
+    const user = req.user;
 
-    // ---------------- Notesheet check ----------------
-    const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
+    //  HELPER
+    const ensureCreatedFields = (notesheet, userRoleId) => {
+      if (!notesheet.created_by_emp_id) {
+        notesheet.created_by_emp_id = notesheet.emp_id;
+      }
+
+      if (!notesheet.created_by_role_id) {
+        notesheet.created_by_role_id = userRoleId;
+      }
+    };
+
+    const notesheet = await Notesheet.findOne({
+      note_id: Number(noteId),
+    });
+
     if (!notesheet) {
       return res.status(404).json({
         success: false,
@@ -271,12 +300,147 @@ export const rejectNotesheet = async (req, res) => {
       });
     }
 
-    // ---------------- Pending flow step fetch ----------------
+    if (notesheet.mode !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Not a direct notesheet",
+      });
+    }
+
+    if (notesheet.status !== "PENDING") {
+      return res.status(400).json({
+        success: false,
+        message: "Already processed",
+      });
+    }
+
+    const userRoleId = user.active_role_id || user.role_id;
+
+    //  AUTH CHECK
+    if (Number(notesheet.forward_to_role_id) !== Number(userRoleId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
+    }
+
+    //  PARALLEL FETCH
+    const [role, employee, toRole] = await Promise.all([
+      Role.findOne({ role_id: userRoleId }),
+      Employee.findOne({ emp_id: user.emp_id }),
+      Role.findOne({ role_id: Number(forward_to_role) }),
+    ]);
+
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: "Role not found",
+      });
+    }
+
+    if (!toRole) {
+      return res.status(404).json({
+        success: false,
+        message: "Target role not found",
+      });
+    }
+
+    //  DUPLICATE CHECK
+    const alreadySent = await NotesheetFlow.findOne({
+      note_id: notesheet.note_id,
+      to_role_id: Number(forward_to_role),
+      final_status: "PENDING",
+    });
+
+    if (alreadySent) {
+      return res.status(400).json({
+        success: false,
+        message: "Already forwarded to this role",
+      });
+    }
+
+    // ================= UPDATE NOTESHEET =================
+    notesheet.forward_to_role_id = Number(forward_to_role);
+    notesheet.forward_to_dept_id = null;
+    notesheet.updated_by = user.emp_id;
+
+    //  FIX (VERY IMPORTANT)
+    ensureCreatedFields(notesheet, userRoleId);
+
+    await notesheet.save();
+
+    // ================= CREATE FLOW =================
+    await NotesheetFlow.create({
+      note_id: notesheet.note_id,
+
+      from_emp_id: user.emp_id,
+      from_emp_name: employee?.emp_name || "Unknown User",
+
+      from_role_id: userRoleId,
+      from_role_name: role.role_name,
+
+      to_emp_id: null,
+      to_emp_name: null,
+
+      to_role_id: Number(forward_to_role),
+      to_role_name: toRole.role_name,
+
+      action: "FORWARDED",
+      remark: remark || null,
+
+      level: role.power_level || 1,
+      final_status: "PENDING",
+    });
+
+    return res.json({
+      success: true,
+      message: "Forwarded (Direct)",
+    });
+
+  } catch (error) {
+    console.error("Forward Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+// ---------------- REJECT NOTESHEET ----------------
+
+export const rejectNotesheet = async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const { remark } = req.body;
+
+    const user = req.user;
+    const userId = user.emp_id;
+    const userRoleId = user.active_role_id || user.role_id;
+
+    // ---------------- FETCH NOTESHEET ----------------
+    const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
+
+    if (!notesheet) {
+      return res.status(404).json({
+        success: false,
+        message: "Notesheet not found",
+      });
+    }
+
+    // ---------------- FETCH USER + ROLE ----------------
+    const [employee, role] = await Promise.all([
+      Employee.findOne({ emp_id: userId }),
+      Role.findOne({ role_id: userRoleId }),
+    ]);
+
+    // ---------------- GET CURRENT PENDING STEP ----------------
     const pendingStep = await NotesheetFlow.findOne({
       note_id: Number(noteId),
       final_status: "PENDING",
-      $or: [{ to_emp_id: userId }, { to_role_id: userRoleId }],
-    });
+      $or: [
+        { to_emp_id: userId },
+        { to_role_id: userRoleId }
+      ],
+    }).sort({ createdAt: -1 });
 
     if (!pendingStep) {
       return res.status(403).json({
@@ -285,29 +449,50 @@ export const rejectNotesheet = async (req, res) => {
       });
     }
 
-    // ---------------- Update step as rejected ----------------
-    pendingStep.final_status = "REJECTED";
-    pendingStep.action = "REJECTED";
-    pendingStep.remark = remark || "Rejected";
-    pendingStep.updatedAt = new Date();
+    // ---------------- CLOSE CURRENT STEP ----------------
+    pendingStep.final_status = "APPROVED"; // close step
     await pendingStep.save();
 
-    // ---------------- Update notesheet overall status ----------------
+    // ---------------- CREATE NEW REJECT FLOW ----------------
+    await NotesheetFlow.create({
+      note_id: notesheet.note_id,
+
+      from_emp_id: userId,
+      from_emp_name: employee?.emp_name || "Unknown User",
+
+      from_role_id: userRoleId,
+      from_role_name: role?.role_name || "Unknown Role",
+
+      to_emp_id: pendingStep.from_emp_id || null,
+      to_emp_name: pendingStep.from_emp_name || null,
+
+      to_role_id: pendingStep.from_role_id || null,
+      to_role_name: pendingStep.from_role_name || null,
+
+      action: "REJECTED",
+      remark: remark || "Rejected",
+
+      level: pendingStep.level,
+      final_status: "REJECTED",
+    });
+
+    // ---------------- UPDATE NOTESHEET ----------------
     notesheet.status = "REJECTED";
     notesheet.rejectedBy = userId;
     notesheet.rejectedDate = new Date();
+
     await notesheet.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Notesheet rejected successfully",
     });
+
   } catch (error) {
     console.error("Reject notesheet error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Error rejecting notesheet",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -316,15 +501,12 @@ export const rejectNotesheet = async (req, res) => {
 export const getQueriesByNoteId = async (req, res) => {
   try {
     const { noteId } = req.params;
-    const currentUserId = req.user.id;
+    const currentUserId = req.user.emp_id; // FIX (id → emp_id)
 
-    // Query + reply dono ke liye flows fetch karo
     const flows = await NotesheetFlow.find({
-      note_id: noteId,
+      note_id: Number(noteId),
       action: { $in: ["QUERY", "QUERY_REPLY"] },
     }).sort({ createdAt: 1 });
-
-    // console.log(" Query Flows:", flows);
 
     const queries = flows
       .filter((flow) => flow.remark)
@@ -335,12 +517,13 @@ export const getQueriesByNoteId = async (req, res) => {
           flow.action === "QUERY"
             ? "question"
             : flow.action === "QUERY_REPLY"
-              ? "reply"
-              : "normal",
+            ? "reply"
+            : "normal",
 
-        authority: flow.from_role_id
-          ? `Role ${flow.from_role_id}`
-          : "Authority",
+        //  MAIN FIX (NAME SHOW)
+        authority: flow.from_emp_name
+          ? `${flow.from_emp_name} (${flow.from_role_name || "Role"})`
+          : `Role ${flow.from_role_id}`,
 
         message: flow.remark,
         time: new Date(flow.createdAt).toLocaleString(),
@@ -351,7 +534,6 @@ export const getQueriesByNoteId = async (req, res) => {
       queries,
     });
   } catch (error) {
-    // console.error("Error fetching queries:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch queries",
@@ -359,204 +541,27 @@ export const getQueriesByNoteId = async (req, res) => {
   }
 };
 
-// // ---------------- SEND QUERY ----------------
-// export const sendQuery = async (req, res) => {
-//   try {
-//     const { noteId } = req.params;
-//     const { query } = req.body;
-
-//     const userId = req.user.emp_id;
-//     const userRoleId = req.user.role_id;
-
-//     //  Fetch notesheet
-//     const notesheet = await Notesheet.findOne({
-//       note_id: Number(noteId),
-//     });
-
-//     if (!notesheet) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Notesheet not found",
-//       });
-//     }
-
-//     //  Current pending step
-//     const pendingStep = await NotesheetFlow.findOne({
-//       note_id: Number(noteId),
-//       final_status: "PENDING",
-//       $or: [{ to_emp_id: userId }, { to_role_id: userRoleId }],
-//     });
-
-//     if (!pendingStep) {
-//       return res.status(403).json({
-//         success: false,
-//         message: "Not authorized to send query",
-//       });
-//     }
-
-//     //  Find previous handler (important)
-//     const lastActionStep = await NotesheetFlow.findOne({
-//       note_id: Number(noteId),
-//       action: { $in: ["FORWARDED", "APPROVED"] },
-//     }).sort({ createdAt: -1 });
-
-//     if (!lastActionStep) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "No previous handler found",
-//       });
-//     }
-
-//     //  Create QUERY step
-//     const newQueryStep = new NotesheetFlow({
-//       note_id: notesheet.note_id,
-
-//       from_emp_id: userId,
-//       from_role_id: userRoleId,
-
-//       to_emp_id: lastActionStep.from_emp_id,
-//       to_role_id: lastActionStep.from_role_id,
-
-//       action: "QUERY",
-//       remark: query,
-
-//       level: pendingStep.level,
-//       final_status: "PENDING",
-//     });
-
-//     await newQueryStep.save();
-
-//     //  Update notesheet (IMPORTANT FIX)
-//     notesheet.forward_to_emp_id = lastActionStep.from_emp_id;
-//     notesheet.forward_to_role_id = lastActionStep.from_role_id;
-//     notesheet.forward_to_dept_id = null;
-//     notesheet.status = "PENDING";
-
-//     await notesheet.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Query sent successfully",
-//       data: newQueryStep,
-//     });
-
-//   } catch (error) {
-//     console.error("Send query error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error sending query",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// export const replyQuery = async (req, res) => {
-//   try {
-//     const { noteId } = req.params;
-//     const { reply, message } = req.body;
-
-//     const finalReply = reply || message;
-
-//     if (!finalReply) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Reply is required",
-//       });
-//     }
-
-//     const userId = req.user.emp_id;
-//     const userRoleId = req.user.role_id;
-
-//     //  Notesheet fetch
-//     const notesheet = await Notesheet.findOne({
-//       note_id: Number(noteId),
-//     });
-
-//     if (!notesheet) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Notesheet not found",
-//       });
-//     }
-
-//     //  Current QUERY step
-//     const currentQueryStep = await NotesheetFlow.findOne({
-//       note_id: Number(noteId),
-//       action: "QUERY",
-//       final_status: "PENDING",
-//       $or: [{ to_emp_id: userId }, { to_role_id: userRoleId }],
-//     });
-
-//     if (!currentQueryStep) {
-//       return res.status(403).json({
-//         success: false,
-//         message: "No query assigned to you",
-//       });
-//     }
-
-//     //  Mark QUERY completed
-//     currentQueryStep.final_status = "REPLIED";
-//     await currentQueryStep.save();
-
-//     //  Reply back
-//     const replyStep = new NotesheetFlow({
-//       note_id: notesheet.note_id,
-//       from_emp_id: userId,
-//       from_role_id: userRoleId,
-//       to_emp_id: currentQueryStep.from_emp_id,
-//       to_role_id: currentQueryStep.from_role_id,
-//       action: "QUERY_REPLY",
-//       remark: finalReply,
-//       level: currentQueryStep.level,
-//       final_status: "PENDING",
-//     });
-
-//     await replyStep.save();
-
-//     //  Update notesheet
-//     notesheet.forward_to_emp_id = currentQueryStep.from_emp_id;
-//     notesheet.forward_to_role_id = currentQueryStep.from_role_id;
-//     notesheet.status = "PENDING";
-
-//     await notesheet.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Query replied successfully",
-//       data: replyStep,
-//     });
-
-//   } catch (error) {
-//     console.error("Reply query error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error replying query",
-//       error: error.message,
-//     });
-//   }
-// };
-
 export const sendQuery = async (req, res) => {
   try {
     const { noteId } = req.params;
-    const { query } = req.body;
+    const { query } = req.body; // single message from frontend
 
     const userId = req.user.emp_id;
-    const userRoleId = req.user.role_id;
+    const userRoleId = req.user.active_role_id;
 
-    //  Fetch notesheet
-    const notesheet = await Notesheet.findOne({
-      note_id: Number(noteId),
-    });
+    // parallel fetch employee and role
+    const [employee, role] = await Promise.all([
+      Employee.findOne({ emp_id: userId }),
+      Role.findOne({ role_id: userRoleId }),
+    ]);
+
+    const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
 
     if (!notesheet) {
-      return res.status(404).json({
-        success: false,
-        message: "Notesheet not found",
-      });
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
     }
 
-    //  Check if user is current holder
+    // check if user is authorized to send query
     const pendingStep = await NotesheetFlow.findOne({
       note_id: Number(noteId),
       final_status: "PENDING",
@@ -564,72 +569,62 @@ export const sendQuery = async (req, res) => {
     });
 
     if (!pendingStep) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to send query",
-      });
+      return res.status(403).json({ success: false, message: "Not authorized to send query" });
     }
 
-    //  Prevent multiple active queries
-    const existingQuery = await NotesheetFlow.findOne({
-      note_id: Number(noteId),
-      action: "QUERY",
-      final_status: "PENDING",
-    });
-
-    if (existingQuery) {
-      return res.status(400).json({
-        success: false,
-        message: "Query already pending",
-      });
-    }
-
-    //  Ensure previous query is replied
-    const lastQuery = await NotesheetFlow.findOne({
-      note_id: Number(noteId),
-      action: "QUERY",
-    }).sort({ createdAt: -1 });
-
-    if (lastQuery && lastQuery.final_status !== "REPLIED") {
-      return res.status(400).json({
-        success: false,
-        message: "Previous query not answered yet",
-      });
-    }
-
-    //  Find previous handler
     const lastActionStep = await NotesheetFlow.findOne({
       note_id: Number(noteId),
       action: { $in: ["FORWARDED", "APPROVED"] },
     }).sort({ createdAt: -1 });
 
     if (!lastActionStep) {
-      return res.status(400).json({
-        success: false,
-        message: "No previous handler found",
-      });
+      return res.status(400).json({ success: false, message: "No previous handler found" });
     }
 
-    //  Create QUERY
-    const newQueryStep = new NotesheetFlow({
-      note_id: notesheet.note_id,
+    const levelValue = pendingStep?.level || notesheet.level || 1;
 
-      from_emp_id: userId,
-      from_role_id: userRoleId,
-
-      to_emp_id: lastActionStep.from_emp_id,
-      to_role_id: lastActionStep.from_role_id,
-
+    //  Check if a pending QUERY already exists
+    let existingQuery = await NotesheetFlow.findOne({
+      note_id: Number(noteId),
       action: "QUERY",
-      remark: query,
-
-      level: pendingStep.level,
       final_status: "PENDING",
     });
 
-    await newQueryStep.save();
+    if (existingQuery) {
+      // Push new message to remark array
+      existingQuery.remark.push(query); // multi-message support
+      await existingQuery.save();
 
-    //  Update notesheet
+      return res.status(200).json({
+        success: true,
+        message: "Query updated with new message",
+      });
+    }
+
+    //  If no pending query → create new
+    await NotesheetFlow.create({
+      note_id: notesheet.note_id,
+
+      from_emp_id: userId,
+      from_emp_name: employee?.emp_name || "Unknown User",
+
+      from_role_id: userRoleId,
+      from_role_name: role?.role_name || "Unknown Role",
+
+      to_emp_id: lastActionStep.from_emp_id,
+      to_emp_name: lastActionStep.from_emp_name || null,
+
+      to_role_id: lastActionStep.from_role_id,
+      to_role_name: lastActionStep.from_role_name || null,
+
+      action: "QUERY",
+      remark: [query], // array me store
+
+      level: levelValue,
+      final_status: "PENDING",
+    });
+
+    // update notesheet forward info
     notesheet.forward_to_emp_id = lastActionStep.from_emp_id;
     notesheet.forward_to_role_id = lastActionStep.from_role_id;
     notesheet.forward_to_dept_id = null;
@@ -637,29 +632,20 @@ export const sendQuery = async (req, res) => {
 
     await notesheet.save();
 
-    return res.status(200).json({
-      success: true,
-      message: "Query sent successfully",
-      data: newQueryStep,
-    });
+    return res.status(200).json({ success: true, message: "Query sent successfully" });
   } catch (error) {
-    console.error("Send query error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error sending query",
-      error: error.message,
-    });
+    console.error("Send Query Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 export const replyQuery = async (req, res) => {
   try {
     const { noteId } = req.params;
-    const { reply, message } = req.body;
+    const { reply } = req.body;
 
-    const finalReply = reply || message;
-
-    if (!finalReply) {
+    if (!reply) {
       return res.status(400).json({
         success: false,
         message: "Reply is required",
@@ -667,76 +653,133 @@ export const replyQuery = async (req, res) => {
     }
 
     const userId = req.user.emp_id;
-    const userRoleId = req.user.role_id;
+    const userRoleId = req.user.active_role_id;
 
-    //  Fetch notesheet
-    const notesheet = await Notesheet.findOne({
-      note_id: Number(noteId),
-    });
+    const [employee, role] = await Promise.all([
+      Employee.findOne({ emp_id: userId }),
+      Role.findOne({ role_id: userRoleId })
+    ]);
 
-    if (!notesheet) {
-      return res.status(404).json({
-        success: false,
-        message: "Notesheet not found",
-      });
-    }
+    const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
+    if (!notesheet) return res.status(404).json({ success: false, message: "Notesheet not found" });
 
-    //  Find current QUERY
     const currentQueryStep = await NotesheetFlow.findOne({
       note_id: Number(noteId),
       action: "QUERY",
       final_status: "PENDING",
-      $or: [{ to_emp_id: userId }, { to_role_id: userRoleId }],
+      $or: [
+        { to_emp_id: userId },
+        { to_role_id: userRoleId }
+      ],
     });
 
     if (!currentQueryStep) {
-      return res.status(403).json({
-        success: false,
-        message: "No query assigned to you",
-      });
+      return res.status(403).json({ success: false, message: "No query assigned to you" });
     }
 
-    //  Mark QUERY as REPLIED (NOT APPROVED ❗)
-    currentQueryStep.final_status = "REPLIED";
+    // Ensure remark is an array for multi-message
+    if (!Array.isArray(currentQueryStep.remark)) {
+      currentQueryStep.remark = currentQueryStep.remark ? [currentQueryStep.remark] : [];
+    }
+    currentQueryStep.remark.push(reply);
     await currentQueryStep.save();
 
-    //  Create QUERY_REPLY
-    const replyStep = new NotesheetFlow({
+    // Create QUERY_REPLY step
+    await NotesheetFlow.create({
       note_id: notesheet.note_id,
-
       from_emp_id: userId,
+      from_emp_name: employee?.emp_name || "Unknown User",
       from_role_id: userRoleId,
-
+      from_role_name: role?.role_name || "Unknown Role",
       to_emp_id: currentQueryStep.from_emp_id,
+      to_emp_name: currentQueryStep.from_emp_name || null,
       to_role_id: currentQueryStep.from_role_id,
-
+      to_role_name: currentQueryStep.from_role_name || null,
       action: "QUERY_REPLY",
-      remark: finalReply,
-
+      remark: reply,
       level: currentQueryStep.level,
       final_status: "PENDING",
     });
 
-    await replyStep.save();
-
-    //  Send back to higher authority
     notesheet.forward_to_emp_id = currentQueryStep.from_emp_id;
     notesheet.forward_to_role_id = currentQueryStep.from_role_id;
     notesheet.status = "PENDING";
-
     await notesheet.save();
+
+    return res.status(200).json({ success: true, message: "Reply sent successfully" });
+
+  } catch (error) {
+    console.error("Reply query error:", error);
+    return res.status(500).json({ success: false, message: "Error replying query" });
+  }
+};
+
+export const getProcessedNotesheets = async (req, res) => {
+  try {
+    const currentRoles = req.user.role_ids || [req.user.active_role_id];
+
+    const processedActions = [
+      "CREATED",
+      "FORWARDED",
+      "APPROVED",
+      "QUERY",
+      "QUERY_REPLY",
+      "REJECTED"
+    ];
+
+    const processedSteps = await NotesheetFlow.find({
+      action: { $in: processedActions },
+      $or: [
+        { from_role_id: { $in: currentRoles } },
+        { to_role_id: { $in: currentRoles } }, 
+        { action: "CREATED", from_emp_id: req.user.emp_id }
+      ]
+    }).sort({ createdAt: 1 });
+
+    if (!processedSteps.length) {
+      return res.status(200).json({ success: true, processedNotesheets: [] });
+    }
+
+    const noteIds = [...new Set(processedSteps.map(step => step.note_id))];
+
+    const processedNotesheets = await Notesheet.find({
+      note_id: { $in: noteIds }
+    }).sort({ createdAt: -1 });
+
+    const history = processedNotesheets.map(note => {
+
+      const steps = processedSteps
+        .filter(step => step.note_id === note.note_id)
+        .map(s => ({
+          action: s.action,
+          byName: s.from_emp_name || "Unknown User",
+          byRole: s.from_role_name || "Unknown Role",
+          remark: s.remark,
+          time: s.createdAt,
+          final_status: s.final_status
+        }));
+
+      const peopleInvolved = [
+        ...new Set(steps.map(s => `${s.byName} (${s.byRole})`))
+      ];
+
+      return {
+        ...note._doc,
+        history: steps,
+        peopleInvolved
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Query replied successfully",
-      data: replyStep,
+      processedNotesheets: history
     });
-  } catch (error) {
-    console.error("Reply query error:", error);
+
+  } catch (err) {
+    console.error("getProcessedNotesheets Error:", err);
     return res.status(500).json({
       success: false,
-      message: "Error replying query",
-      error: error.message,
+      message: "Error fetching processed notesheets"
     });
   }
 };

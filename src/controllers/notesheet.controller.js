@@ -261,34 +261,112 @@ export const getApprovalFlow = async (req, res) => {
   try {
     const noteId = Number(req.params.noteId);
 
-    const flow = await NotesheetFlow.aggregate([
-      {
-        $match: { note_id: noteId }
-      },
+    // Fetch notesheet details first
+    const notesheet = await Notesheet.findOne({ note_id: noteId }).lean();
+    if (!notesheet) {
+      return res.status(404).json({
+        success: false,
+        message: "Notesheet not found",
+      });
+    }
 
+    // Fetch approval flow
+    const flow = await NotesheetFlow.aggregate([
+      { $match: { note_id: noteId } },
+
+      // From employee lookup
       {
         $lookup: {
           from: "employees",
           localField: "from_emp_id",
           foreignField: "emp_id",
-          as: "fromEmployee"
-        }
+          as: "fromEmployee",
+        },
       },
 
+      // To employee lookup
       {
         $lookup: {
           from: "employees",
           localField: "to_emp_id",
           foreignField: "emp_id",
-          as: "toEmployee"
-        }
+          as: "toEmployee",
+        },
       },
 
+      // To role lookup
+      {
+        $lookup: {
+          from: "roles",
+          localField: "to_role_id",
+          foreignField: "role_id",
+          as: "toRole",
+        },
+      },
+
+      { $unwind: { path: "$toRole", preserveNullAndEmptyArrays: true } },
+
+      // Lookup employees assigned to the role
+      {
+        $lookup: {
+          from: "employees",
+          let: { roleId: "$to_role_id" },
+          pipeline: [
+            { $match: { $expr: { $in: ["$$roleId", "$role_ids"] } } },
+          ],
+          as: "roleEmployee",
+        },
+      },
+
+      // Add fields for names and roles
       {
         $addFields: {
           from_name: { $arrayElemAt: ["$fromEmployee.emp_name", 0] },
-          to_name: { $arrayElemAt: ["$toEmployee.emp_name", 0] }
-        }
+          from_role_name: {
+            $ifNull: [
+              { $arrayElemAt: ["$fromEmployee.active_role_name", 0] },
+              "$fromRole.role_name",
+            ],
+          },
+          to_name: {
+            $cond: [
+              { $gt: [{ $size: "$toEmployee" }, 0] },
+              { $arrayElemAt: ["$toEmployee.emp_name", 0] },
+              {
+                $cond: [
+                  { $gt: [{ $size: "$roleEmployee" }, 0] },
+                  { $arrayElemAt: ["$roleEmployee.emp_name", 0] },
+                  null,
+                ],
+              },
+            ],
+          },
+          to_role_name: {
+            $switch: {
+              branches: [
+                {
+                  case: { $in: ["$action", ["QUERY", "QUERY_REPLY"]] },
+                  then: "$toRole.role_name",
+                },
+                {
+                  case: { $in: ["$action", ["CREATED", "FORWARDED"]] },
+                  then: {
+                    $cond: [
+                      { $gt: [{ $size: "$toEmployee" }, 0] },
+                      null,
+                      "$toRole.role_name",
+                    ],
+                  },
+                },
+                {
+                  case: { $in: ["$action", ["APPROVED", "REJECTED"]] },
+                  then: "$toRole.role_name",
+                },
+              ],
+              default: "$toRole.role_name",
+            },
+          },
+        },
       },
 
       {
@@ -300,51 +378,78 @@ export const getApprovalFlow = async (req, res) => {
           remark: 1,
           final_status: 1,
           createdAt: 1,
-
           from_emp_id: 1,
           from_name: 1,
-
+          from_role_name: 1,
           to_emp_id: 1,
-          to_name: 1
-        }
+          to_name: 1,
+          to_role_id: 1,
+          to_role_name: 1,
+        },
       },
 
-      {
-        $sort: { level: 1 }
-      }
+      { $sort: { createdAt: 1 } },
     ]);
 
+    // Send both notesheet and flow
     return res.status(200).json({
       success: true,
-      data: flow
+      notesheet,
+      data: flow,
     });
-
   } catch (error) {
-
+    console.error("Approval Flow Error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
-
   }
 };
+
 
 export const getRecentNotesheets = async (req, res) => {
   try {
     const user = req.user;
 
+    console.log("User in recent API:", user); // 🔍 debug
+
     const recentNotes = await Notesheet.aggregate([
       {
         $match: {
           $or: [
-            { created_by: user.emp_id },                   // created by user
-            { $and: [{ forward_to_role_id: user.role_id }, { status: "PENDING" }] },  // pending for user
-            { $and: [{ updated_by: user.emp_id }, { status: { $ne: "PENDING" } }] }  // processed by user
+            //  1. Created by user
+            { created_by: user.empId },  
+
+            //  2. Pending for user's role
+            {
+              $and: [
+                { forward_to_role_id: user.role_id },
+                { status: "PENDING" }
+              ]
+            },
+
+            //  3. Pending for specific employee (important )
+            {
+              $and: [
+                { forward_to_emp_id: user.empId },
+                { status: "PENDING" }
+              ]
+            },
+
+            //  4. Already processed by user
+            {
+              $and: [
+                { updated_by: user.empId },
+                { status: { $ne: "PENDING" }
+                }
+              ]
+            }
           ]
         }
       },
 
+      // Creator details
       {
         $lookup: {
           from: "employees",
@@ -370,7 +475,8 @@ export const getRecentNotesheets = async (req, res) => {
           created_by: 1,
           created_by_name: 1,
           forward_to_role_id: 1,
-          forward_to_dept_id: 1
+          forward_to_dept_id: 1,
+          forward_to_emp_id: 1
         }
       },
 
@@ -385,6 +491,103 @@ export const getRecentNotesheets = async (req, res) => {
 
   } catch (error) {
     console.error("Recent Notesheets Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+export const getAllNotesheetsByScope = async (req, res) => {
+  try {
+    const { empId, scope } = req.query;
+
+    if (!empId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required"
+      });
+    }
+
+    const employee = await Employee.findOne({ emp_id: empId });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found"
+      });
+    }
+
+    //  FIX: roleId sabse pehle define karo
+    const roleId = employee.active_role_id
+      ? Number(employee.active_role_id)
+      : null;
+
+    const activeRole = roleId
+      ? await Role.findOne({ role_id: roleId })
+      : null;
+
+    const roleDeptIds = activeRole?.dept_ids?.length
+      ? activeRole.dept_ids
+      : [];
+
+    //  Allowed scopes
+    let allowedScopes = ["MY"];
+
+    if (activeRole) {
+      if (activeRole.view_scope === "ALL") {
+        allowedScopes = ["MY", "DEPARTMENT", "ALL"];
+      } else if (activeRole.view_scope === "DEPARTMENT") {
+        allowedScopes = ["MY", "DEPARTMENT"];
+      }
+    }
+
+    const appliedScope = allowedScopes.includes(scope) ? scope : "MY";
+
+    let filter = {};
+
+    //  MY → ONLY ROLE CREATED
+    if (appliedScope === "MY") {
+      if (!roleId) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          data: []
+        });
+      }
+
+      filter = {
+        created_by_role_id: roleId
+      };
+    }
+
+    //  DEPARTMENT → ROLE DEPT BASED
+    else if (appliedScope === "DEPARTMENT") {
+      filter = {
+        dept_id: { $in: roleDeptIds }
+      };
+    }
+
+    //  ALL → SAB DIKHEGA
+    else if (appliedScope === "ALL") {
+      filter = {};
+    }
+
+    console.log(" Applied Scope:", appliedScope);
+    console.log(" Role ID:", roleId);
+    console.log(" Final Filter:", filter);
+
+    const notesheets = await Notesheet.find(filter).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: notesheets.length,
+      data: notesheets
+    });
+
+  } catch (error) {
+    console.error("Get Notesheets Error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Internal server error"

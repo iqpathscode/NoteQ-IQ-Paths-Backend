@@ -14,19 +14,13 @@ const roleSchema = new mongoose.Schema(
       trim: true,
     },
 
-    power_level: {
-      type: Number,
-      required: true,
-      default: 0,
+    dept_ids: {
+      type: [Number], // multi department support
+      default: [],
     },
-dept_ids: {
-  type: [Number],   
-  required: true,   // must have at least one dept
-  default: [],
-},
 
     power_id: {
-      type: Number,
+      type: Number, // reference to Power
       required: true,
     },
 
@@ -34,16 +28,24 @@ dept_ids: {
       type: Boolean,
       default: false,
     },
+
+    view_scope: {
+  type: String,
+  enum: ["OWN", "DEPARTMENT", "ALL"],
+  default: "OWN",
+},
+view_dept_ids: {
+  type: [Number],
+  default: [],  
   },
+},
   { timestamps: true }
 );
 
-// Prevent duplicate role names in same department
+// Indexes
 roleSchema.index({ role_name: 1 });
-
-// Fast lookup for approvers
 roleSchema.index({ power_id: 1 });
+roleSchema.index({ dept_ids: 1 });
 
 const Role = mongoose.model("Role", roleSchema);
-
 export default Role;

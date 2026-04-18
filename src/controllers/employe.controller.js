@@ -4,6 +4,7 @@ import Employee from "../models/user/employee.model.js";
 import Department from "../models/office/department.model.js";
 import Notesheet from "../models/notes/notesheet.model.js";
 import Role from "../models/userPowers/role.model.js";
+import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 
 const employeeDetailsPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -41,7 +42,8 @@ const employeeDetailsPipeline = (matchStage = null) => {
         emp_id: 1,
         emp_name: 1,
         designation: 1,
-        roles: 1,
+        role_ids: 1,
+        active_role_id: 1,
         dept_id: 1,
         department_name: 1,
         notesheet_count: 1,
@@ -119,43 +121,35 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
       });
     }
 
-    const summary = await Notesheet.aggregate([
-      { $match: { emp_id: empId } },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 },
-        },
-      },
-    ]);
+    // Total notesheets created by the user
+    const totalCount = await Notesheet.countDocuments({ emp_id: empId });
 
-    const countsByStatus = {
-      PENDING: 0,
-      APPROVED: 0,
-      REJECTED: 0,
-    };
+    //  Pending notesheets created by the user
+    const pendingCount = await Notesheet.countDocuments({
+      emp_id: empId,
+      status: "PENDING",
+    });
 
-    for (const item of summary) {
-      if (item?._id && countsByStatus[item._id] !== undefined) {
-        countsByStatus[item._id] = item.count;
-      }
-    }
-
-    const total =
-      countsByStatus.PENDING +
-      countsByStatus.APPROVED +
-      countsByStatus.REJECTED;
+    //  Approved notesheets created by the user
+    const approvedCount = await Notesheet.countDocuments({
+      emp_id: empId,
+      status: "APPROVED",
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Notesheet summary fetched successfully",
+      message: "User-specific notesheet summary fetched successfully",
       data: {
         emp_id: empId,
-        total,
-        byStatus: countsByStatus,
+        total: totalCount,
+        byStatus: {
+          PENDING: pendingCount,
+          APPROVED: approvedCount,
+        },
       },
     });
   } catch (error) {
+    console.error("Summary Error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -164,96 +158,79 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
   }
 };
 
-// Assign Role to Faculty
 export const assignRoleToFaculty = async (req, res) => {
   try {
     const { emp_id, role_name, dept_id } = req.body;
 
-    if (!emp_id || !role_name || !dept_id) {
+    if (!emp_id || !role_name) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID, Role Name, and Department ID are required",
+        message: "Employee ID and Role Name are required",
       });
     }
 
     const employee = await Employee.findOne({ emp_id });
+
     if (!employee) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Employee not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
     }
 
-    // Fetch latest role from DB
     const roleExists = await Role.findOne({
       role_name: { $regex: new RegExp(`^${role_name}$`, "i") },
-      dept_ids: Number(dept_id),
+      $or: [{ dept_ids: Number(dept_id) }, { dept_ids: { $size: 0 } }],
     });
 
     if (!roleExists) {
       return res.status(404).json({
         success: false,
-        message: "Role not found for this department",
+        message: "Role not found",
       });
     }
 
-    // ---------------- HOD UNIQUE CHECK ----------------
-    if (roleExists.role_name.toUpperCase() === "HOD") {
-      const existingHOD = await Employee.findOne({
-        roles: {
-          $elemMatch: {
-            role_name: "HOD",
-            dept_id: Number(dept_id),
-          },
+    //  UNIQUE ROLE FIX (REMOVE FROM ALL FIRST)
+    if (roleExists.is_unique_role) {
+      await Employee.updateMany(
+        { role_ids: roleExists.role_id },
+        {
+          $pull: { role_ids: roleExists.role_id },
+          $unset: { active_role_id: "" },
         },
+      );
+    }
+
+    //  DUPLICATE CHECK
+    if (employee.role_ids?.includes(roleExists.role_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee already has this role",
       });
-
-      if (existingHOD) {
-        return res.status(400).json({
-          success: false,
-          message: `Department ${dept_id} already has an HOD assigned: ${existingHOD.emp_id}`,
-        });
-      }
     }
 
-    employee.roles = employee.roles || [];
-
-    const alreadyHasRole = employee.roles.some(
-      (r) => r.role_id === roleExists.role_id,
+    //  ASSIGN ROLE
+    const updatedEmployee = await Employee.findOneAndUpdate(
+      { emp_id: Number(emp_id) },
+      {
+        $addToSet: { role_ids: roleExists.role_id }, //  no duplicate
+        $set: {
+          active_role_id: employee.active_role_id || roleExists.role_id,
+        },
+      },
+      { new: true },
     );
-
-    if (!alreadyHasRole) {
-      const newRole = {
-        role_id: roleExists.role_id,
-        role_name: roleExists.role_name,
-        power_id: roleExists.power_id,
-        canReceiveNotesheet: roleExists.canReceiveNotesheet,
-        dept_ids: roleExists.dept_ids,
-        power_level: roleExists.power_level ?? 0,
-      };
-
-      employee.roles.push(newRole);
-
-      // first role -> set active role
-      if (!employee.active_role || !employee.active_role.role_id) {
-        employee.active_role = newRole;
-      }
-
-      await employee.save();
-    }
 
     return res.json({
       success: true,
-      message: alreadyHasRole
-        ? "Role already assigned!"
-        : "Role assigned successfully!",
-      data: employee,
+      message: `Role "${roleExists.role_name}" assigned successfully`,
+      data: updatedEmployee,
     });
   } catch (error) {
     console.error("Assign Role Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      message: error.message,
     });
   }
 };
@@ -360,15 +337,15 @@ export const switchEmployeeRole = async (req, res) => {
         .json({ success: false, message: "Employee not found" });
     }
 
-    const hasRole = employee.roles.some(
-      (r) => Number(r.role_id) === Number(role_id),
-    );
+    // Check role against role_ids array
+    const hasRole = employee.role_ids.includes(Number(role_id));
     if (!hasRole) {
       return res
         .status(403)
         .json({ success: false, message: "You are not assigned this role" });
     }
 
+    //  Fetch role details from Role table
     const roleFromRoleTable = await Role.findOne({ role_id }).lean();
     if (!roleFromRoleTable) {
       return res
@@ -376,7 +353,8 @@ export const switchEmployeeRole = async (req, res) => {
         .json({ success: false, message: "Role not found in Role table" });
     }
 
-    // update active role
+    //  Update active_role_id and optional full role object
+    employee.active_role_id = Number(role_id);
     employee.active_role = {
       role_id: roleFromRoleTable.role_id,
       role_name: roleFromRoleTable.role_name,
@@ -387,13 +365,13 @@ export const switchEmployeeRole = async (req, res) => {
     };
     await employee.save();
 
-    // NEW TOKEN GENERATE
+    //  Generate new token with updated role
     const token = jwt.sign(
       {
         emp_id: employee.emp_id,
         role_id: roleFromRoleTable.role_id,
         dept_id: employee.dept_id,
-        isAdmin: false,
+        isAdmin: employee.isAdmin || false,
       },
       env.JWT_SECRET,
       { expiresIn: env.JWT_EXPIRES_IN },
@@ -402,7 +380,7 @@ export const switchEmployeeRole = async (req, res) => {
     res.cookie("token", token, {
       httpOnly: true,
       sameSite: "strict",
-      secure: false,
+      secure: false, // change to true in production with HTTPS
     });
 
     console.log("active role after switch:", employee.active_role);
@@ -416,5 +394,41 @@ export const switchEmployeeRole = async (req, res) => {
   } catch (error) {
     console.error("Error switching role:", error);
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const transferRole = async (req, res) => {
+  try {
+    let { roleId, newUserId } = req.body;
+    const roleIdNum = Number(roleId);
+
+    // CURRENT USER
+    const currentUser = await Employee.findOne({ role_ids: roleIdNum });
+    if (currentUser) {
+      currentUser.role_ids = currentUser.role_ids.filter(r => r !== roleIdNum);
+      if (currentUser.active_role_id === roleIdNum) currentUser.active_role_id = null;
+      await currentUser.save();
+    }
+
+    // NEW USER
+    const newUser = await Employee.findOne({ emp_id: newUserId });
+    if (!newUser) return res.status(404).json({ success: false, message: "New user not found" });
+
+    if (!newUser.role_ids) newUser.role_ids = [];
+    if (!newUser.role_ids.includes(roleIdNum)) newUser.role_ids.push(roleIdNum);
+    newUser.active_role_id = roleIdNum;
+    await newUser.save();
+
+    //  OPTIONAL: Log NotesheetFlow update for new holder
+    await NotesheetFlow.updateMany(
+      { to_role_id: roleIdNum, to_emp_id: null }, // unassigned flows
+      { $set: { to_emp_id: newUserId } }
+    );
+
+    return res.status(200).json({ success: true, message: "Role transferred successfully" });
+
+  } catch (err) {
+    console.error("transferRole Error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

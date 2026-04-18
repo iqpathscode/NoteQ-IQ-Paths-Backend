@@ -5,6 +5,7 @@ import { env } from "../../config/env.config.js";
 import { generateEmpId } from "../../utility/generateEmpID.js";
 import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
+import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
 
 export const login = async (req, res) => {
@@ -157,11 +158,21 @@ export const changePassword = async (req, res) => {
     });
   }
 };
+
 export const getMe = async (req, res) => {
   try {
-    // Agar user admin hai
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // ================= ADMIN =================
     if (req.user.isAdmin) {
-      const admin = await Admin.findOne({ admin_id: req.user.admin_id });
+      const admin = await Admin.findOne({
+        admin_id: req.user.admin_id,
+      });
 
       if (!admin) {
         return res.status(404).json({
@@ -176,15 +187,17 @@ export const getMe = async (req, res) => {
           admin_id: admin.admin_id,
           username: admin.username,
           isAdmin: true,
-          roles: [], // Admin ke liye roles optional
+          roles: [],
           active_role: null,
           canReceiveNotesheet: false,
         },
       });
     }
 
-    // Agar normal employee hai
-    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+    // ================= EMPLOYEE =================
+    const employee = await Employee.findOne({
+      emp_id: req.user.emp_id,
+    });
 
     if (!employee) {
       return res.status(404).json({
@@ -193,20 +206,44 @@ export const getMe = async (req, res) => {
       });
     }
 
-    const rolePower = await Power.findOne({
-      power_id: employee.active_role?.role_id || employee.role_id,
+    //  FETCH ROLES + POWER TOGETHER
+    const roles = await Role.find({
+      role_id: { $in: employee.role_ids || [] },
+    }).lean();
+
+    const powers = await Power.find({
+      power_id: { $in: roles.map(r => r.power_id) },
+    }).lean();
+
+    //  Merge power into roles
+    const rolesWithPower = roles.map(role => {
+      const power = powers.find(p => p.power_id === role.power_id);
+      return {
+        ...role,
+        power_level: power?.power_level || 1,
+        power_type: power?.power_type || null,
+      };
     });
 
-    res.json({
+    //  ACTIVE ROLE
+    const activeRole = rolesWithPower.find(
+      r => r.role_id === employee.active_role_id
+    );
+
+    return res.json({
       success: true,
       user: {
         emp_id: employee.emp_id,
         emp_name: employee.emp_name,
         dept_id: employee.dept_id,
         isAdmin: false,
-        roles: employee.roles || [],
-        active_role: employee.active_role,
-        canReceiveNotesheet: rolePower?.canReceiveNotesheet || false,
+        role_ids: employee.role_ids,
+
+        roles: rolesWithPower,  //  FIXED
+        active_role: activeRole || null,
+
+        canReceiveNotesheet:
+          activeRole?.canReceiveNotesheet || false,
       },
     });
   } catch (error) {
@@ -218,11 +255,19 @@ export const getMe = async (req, res) => {
   }
 };
 
-
 export const createUserByAdmin = async (req, res) => {
   try {
     const { emp_name, designation, mobile_number, email, dept_id } = req.body;
 
+    // 🔹 Validation
+    if (!emp_name || !designation || !mobile_number || !email || !dept_id) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    // 🔹 Check existing user
     const existing = await Employee.findOne({
       $or: [{ email }, { mobile_number }],
     });
@@ -234,53 +279,53 @@ export const createUserByAdmin = async (req, res) => {
       });
     }
 
+    // 🔹 Generate ID & password
     const emp_id = await generateEmpId();
     const defaultPassword = "iqpaths@123";
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-    const defaultRole = await Role.findOne({ role_name: "Employee" });
+    // 🔹 Get department (for school_id)
+    const dept = await Department.findOne({ dept_id: Number(dept_id) });
 
-    if (!defaultRole) {
+    if (!dept) {
       return res.status(400).json({
         success: false,
-        message: "Default role 'Employee' not found.",
+        message: "Invalid department",
       });
     }
 
-    const roleData = {
-      role_id: defaultRole.role_id,
-      role_name: defaultRole.role_name,
-      dept_id: dept_id,
-      power_level: defaultRole.power_level,
-      power_id: defaultRole.power_id,
-      canReceiveNotesheet: defaultRole.canReceiveNotesheet,
-    };
-
+    //  CREATE USER (DEFAULT EMPLOYEE STATE)
     const user = await Employee.create({
       emp_id,
       emp_name,
       designation,
       mobile_number,
       email,
-      dept_id,
+      dept_id: Number(dept_id),
+      school_id: dept.school_id, // auto set
+
       password: hashedPassword,
 
-      roles: [roleData],
-      active_role: roleData,
+      //  IMPORTANT: No role assigned initially
+      role_ids: [],            // empty = no role yet
+      active_role_id: null,    // null = no active role
     });
 
-    res.json({
+    res.status(201).json({
       success: true,
       message: "User created successfully",
       data: {
         emp_id: user.emp_id,
         email: user.email,
         defaultPassword,
-        role: roleData.role_name,
+        role_status: "No role assigned", //  helpful for UI
       },
     });
   } catch (err) {
     console.error("Create User Error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message || "Something went wrong",
+    });
   }
 };
