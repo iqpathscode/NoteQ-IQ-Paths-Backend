@@ -2,6 +2,51 @@ import Notesheet from "../models/notes/notesheet.model.js";
 import Role from "../models/userPowers/role.model.js";
 import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import Employee from "../models/user/employee.model.js";
+import Power from "../models/userPowers/power.model.js";
+import Department from "../models/office/department.model.js";
+// export const getReceivedNotesheets = async (req, res) => {
+//   try {
+//     const user = await Employee.findOne({ emp_id: req.user.emp_id });
+
+//     if (!user) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     // ONLY ACTIVE ROLE ( MAIN FIX)
+//     const activeRoleId = user.active_role_id;
+
+//     const role = await Role.findOne({ role_id: activeRoleId });
+
+//     const roleDeptIds = role?.dept_ids?.length
+//       ? role.dept_ids
+//       : [user.dept_id];
+
+//     const notesheets = await Notesheet.find({
+//       status: "PENDING",
+//       forward_to_role_id: activeRoleId, // ONLY ACTIVE ROLE
+//       $or: [
+//         { forward_to_dept_id: { $in: roleDeptIds } },
+//         { forward_to_dept_id: null },
+//       ],
+//     }).sort({ createdAt: -1 });
+
+//     return res.json({
+//       success: true,
+//       data: notesheets,
+//     });
+
+//   } catch (error) {
+//     console.error("ERROR ", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// };
+
 
 export const getReceivedNotesheets = async (req, res) => {
   try {
@@ -14,23 +59,51 @@ export const getReceivedNotesheets = async (req, res) => {
       });
     }
 
-    // ONLY ACTIVE ROLE ( MAIN FIX)
     const activeRoleId = user.active_role_id;
 
     const role = await Role.findOne({ role_id: activeRoleId });
+    const power = await Power.findOne({ power_id: role.power_id });
 
-    const roleDeptIds = role?.dept_ids?.length
-      ? role.dept_ids
-      : [user.dept_id];
-
-    const notesheets = await Notesheet.find({
+    let query = {
       status: "PENDING",
-      forward_to_role_id: activeRoleId, // ONLY ACTIVE ROLE
-      $or: [
+      forward_to_role_id: activeRoleId,
+    };
+
+    // =========================================================
+    // ✅ SCOPE BASED FILTER (MAIN FIX)
+    // =========================================================
+
+    // 🔹 GLOBAL → no dept filter
+    if (power.scope === "GLOBAL") {
+      // nothing extra
+    }
+
+    // 🔹 SCHOOL
+    else if (power.scope === "SCHOOL") {
+      const departments = await Department.find({
+        dept_id: { $in: role.dept_ids },
+      });
+
+      const schoolIds = [
+        ...new Set(departments.map((d) => d.school_id)),
+      ];
+
+      query.forward_to_school_id = { $in: schoolIds };
+    }
+
+    // 🔹 DEPARTMENT
+    else {
+      const roleDeptIds = role?.dept_ids?.length
+        ? role.dept_ids
+        : [user.primary_dept_id];
+
+      query.$or = [
         { forward_to_dept_id: { $in: roleDeptIds } },
         { forward_to_dept_id: null },
-      ],
-    }).sort({ createdAt: -1 });
+      ];
+    }
+
+    const notesheets = await Notesheet.find(query).sort({ createdAt: -1 });
 
     return res.json({
       success: true,
@@ -497,49 +570,238 @@ export const rejectNotesheet = async (req, res) => {
   }
 };
 
+// controllers/notesheet.controller.js
+// export const getReceivedQueryNotesheets = async (req, res) => {
+//   try {
+//     console.log(" API HIT: getReceivedQueryNotesheets");
+//     console.log(" User:", req.user);
+
+//     const currentEmpId = req.user?.emp_id;
+//     const currentRoleId = req.user?.active_role_id;
+
+//     console.log(" currentEmpId:", currentEmpId);
+//     console.log(" currentRoleId:", currentRoleId);
+
+//     if (!currentEmpId || !currentRoleId) {
+//       console.log(" Unauthorized - missing emp_id or role_id");
+
+//       return res.status(401).json({
+//         success: false,
+//         message: "Unauthorized user",
+//       });
+//     }
+
+//     console.log(" Fetching flows from DB...");
+
+//     const flows = await NotesheetFlow.find({
+//       action: { $in: ["QUERY", "QUERY_REPLY"] },
+//       to_role_id: currentRoleId,
+//     })
+//       .sort({ createdAt: -1 })
+//       .lean();
+
+//     console.log(" Flows found:", flows.length);
+//     console.log(" Sample flow:", flows[0] || null);
+
+//     const map = new Map();
+
+//     flows.forEach((flow) => {
+//       const id = flow.note_id;
+
+//       if (!map.has(id)) {
+//         map.set(id, {
+//           note_id: flow.note_id,
+//           subject: flow.subject || "",
+//           lastMessage: "",
+//           updatedAt: flow.createdAt,
+//           queryCount: 0,
+//           participants: [],
+//         });
+//       }
+
+//       const item = map.get(id);
+
+//       item.queryCount += 1;
+//       item.lastMessage = Array.isArray(flow.remark)
+//         ? flow.remark.join(", ")
+//         : flow.remark;
+
+//       item.updatedAt = flow.createdAt;
+
+//       item.participants.push({
+//         from: flow.from_emp_name,
+//         role: flow.from_role_name,
+//       });
+//     });
+
+//     console.log(" Final grouped result:", Array.from(map.values()).length);
+
+//     return res.status(200).json({
+//       success: true,
+//       count: map.size,
+//       data: Array.from(map.values()),
+//     });
+//   } catch (error) {
+//     console.error(" getReceivedQueryNotesheets ERROR:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch query notesheets",
+//     });
+//   }
+// };
+
 // Get Query Conversation
+// export const getQueriesByNoteId = async (req, res) => {
+//   try {
+//     const { noteId } = req.params;
+//     const currentUserId = req.user.emp_id; // FIX (id → emp_id)
+
+//     const flows = await NotesheetFlow.find({
+//       note_id: Number(noteId),
+//       action: { $in: ["QUERY", "QUERY_REPLY"] },
+//     }).sort({ createdAt: 1 });
+
+//     // const queries = flows
+//     //   .filter((flow) => flow.remark)
+//     //   .map((flow) => ({
+//     //     from: flow.from_emp_id === currentUserId ? "self" : "other",
+
+//     //     type:
+//     //       flow.action === "QUERY"
+//     //         ? "question"
+//     //         : flow.action === "QUERY_REPLY"
+//     //         ? "reply"
+//     //         : "normal",
+
+//     //     //  MAIN FIX (NAME SHOW)
+//     //     authority: flow.from_emp_name
+//     //       ? `${flow.from_emp_name} (${flow.from_role_name || "Role"})`
+//     //       : `Role ${flow.from_role_id}`,
+
+//     //     message: flow.remark,
+//     //     time: new Date(flow.createdAt).toLocaleString(),
+//     //   }));
+
+//     const queries = flows
+//   .filter((flow) => flow.remark && flow.remark.length > 0)
+//   .map((flow) => ({
+//     from: flow.from_emp_id === currentUserId ? "self" : "other",
+
+//     type:
+//       flow.action === "QUERY"
+//         ? "question"
+//         : flow.action === "QUERY_REPLY"
+//         ? "reply"
+//         : "normal",
+
+//     authority: flow.from_emp_name
+//       ? `${flow.from_emp_name} (${flow.from_role_name || "Role"})`
+//       : `Role ${flow.from_role_id}`,
+
+//     message: Array.isArray(flow.remark)
+//       ? flow.remark.join(", ")
+//       : flow.remark,
+
+//     time: new Date(flow.createdAt).toLocaleString(),
+//   }));
+
+//     return res.status(200).json({
+//       success: true,
+//       queries,
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch queries",
+//     });
+//   }
+// };
+
 export const getQueriesByNoteId = async (req, res) => {
   try {
     const { noteId } = req.params;
-    const currentUserId = req.user.emp_id; // FIX (id → emp_id)
+    const currentUserId = req.user?.emp_id;
+
+    if (!noteId) {
+      return res.status(400).json({
+        success: false,
+        message: "noteId is required",
+      });
+    }
+
+    if (!currentUserId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized user",
+      });
+    }
+
+    const normalizedNoteId = isNaN(Number(noteId))
+      ? noteId
+      : Number(noteId);
 
     const flows = await NotesheetFlow.find({
-      note_id: Number(noteId),
+      note_id: normalizedNoteId,
       action: { $in: ["QUERY", "QUERY_REPLY"] },
-    }).sort({ createdAt: 1 });
+    })
+      .sort({ createdAt: 1 })
+      .lean();
 
     const queries = flows
-      .filter((flow) => flow.remark)
-      .map((flow) => ({
-        from: flow.from_emp_id === currentUserId ? "self" : "other",
+      .filter((flow) => flow.remark && flow.remark.length > 0)
+      .map((flow) => {
+        const message = Array.isArray(flow.remark)
+          ? flow.remark.join(", ")
+          : flow.remark;
 
-        type:
-          flow.action === "QUERY"
-            ? "question"
-            : flow.action === "QUERY_REPLY"
-            ? "reply"
-            : "normal",
+        return {
+          id: flow._id.toString(),
 
-        //  MAIN FIX (NAME SHOW)
-        authority: flow.from_emp_name
-          ? `${flow.from_emp_name} (${flow.from_role_name || "Role"})`
-          : `Role ${flow.from_role_id}`,
+          from:
+            Number(flow.from_emp_id) === Number(currentUserId)
+              ? "self"
+              : "other",
 
-        message: flow.remark,
-        time: new Date(flow.createdAt).toLocaleString(),
-      }));
+          type:
+            flow.action === "QUERY"
+              ? "question"
+              : flow.action === "QUERY_REPLY"
+              ? "reply"
+              : "normal",
+
+          authority: flow.from_emp_name
+            ? `${flow.from_emp_name} (${flow.from_role_name || "Role"})`
+            : `Role ${flow.from_role_id}`,
+
+          message: message || "",
+
+          time: new Date(flow.createdAt).toISOString(),
+
+          meta: {
+            roleId: flow.from_role_id,
+            empId: flow.from_emp_id,
+          },
+        };
+      });
 
     return res.status(200).json({
       success: true,
+      count: queries.length,
       queries,
     });
+
   } catch (error) {
+    console.error("getQueriesByNoteId ERROR:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch queries",
     });
   }
 };
+
+
 
 export const sendQuery = async (req, res) => {
   try {

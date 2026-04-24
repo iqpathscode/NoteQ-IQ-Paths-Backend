@@ -196,6 +196,7 @@ router.post("/notesheet", authenticate, createNotesheet);
 // LIST (clean grouping)
 router.get("/notesheets", authenticate, getAllNotesheets);
 router.get("/notesheets/recent", authenticate, getRecentNotesheets);
+// router.get("/notesheets/query-received", authenticate, getReceivedQueryNotesheets);
 router.get("/notesheets/received", authenticate, getReceivedNotesheets);
 router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
 router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);

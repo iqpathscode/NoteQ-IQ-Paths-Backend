@@ -498,9 +498,13 @@ export const getAllNotesheetsByScope = async (req, res) => {
         ? { created_by_role_id: roleId }
         : { created_by_emp_id: empId };
     } else if (appliedScope === "DEPARTMENT") {
-      filter = roleDeptIds.length
-        ? { dept_id: { $in: roleDeptIds } }
-        : { _id: null };
+      // filter = roleDeptIds.length
+      //   ? { dept_id: { $in: roleDeptIds } }
+      //   : { _id: null };
+      filter =
+  viewDeptIds.length > 0
+    ? { dept_id: { $in: viewDeptIds } }
+    : { _id: null };
     } else {
       filter = {};
     }

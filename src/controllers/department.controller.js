@@ -2,6 +2,7 @@ import Department from "../models/office/department.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 import School from "../models/office/school.model.js";
 import Employee from "../models/user/employee.model.js";
+import Role from "../models/userPowers/role.model.js";
 
 export const createDepartment = async (req, res) => {
   try {
@@ -114,7 +115,9 @@ export const deleteDepartment = async (req, res) => {
       });
     }
 
-    const department = await Department.findOne({ dept_id: Number(id) });
+    const deptId = Number(id);
+
+    const department = await Department.findOne({ dept_id: deptId });
 
     if (!department) {
       return res.status(404).json({
@@ -123,20 +126,27 @@ export const deleteDepartment = async (req, res) => {
       });
     }
 
-    // ✅ Correct dependency check
-    const employeeExists = await Employee.exists({
-      dept_id: Number(id),
-    });
+    //  Employee check
+    const employeeExists = await Employee.exists({ dept_id: deptId });
 
     if (employeeExists) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cannot delete department. It is assigned to employees.",
+        message: "Cannot delete department. It is assigned to employees.",
       });
     }
 
-    await Department.deleteOne({ dept_id: Number(id) });
+    // FIXED: Role check (array field)
+    const roleExists = await Role.exists({ dept_ids: deptId });
+
+    if (roleExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete department. It is assigned to roles.",
+      });
+    }
+
+    await Department.deleteOne({ dept_id: deptId });
 
     return res.status(200).json({
       success: true,
