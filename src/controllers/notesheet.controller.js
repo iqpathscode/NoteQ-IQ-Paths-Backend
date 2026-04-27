@@ -451,20 +451,29 @@ export const getRecentNotesheets = async (req, res) => {
     });
   }
 };
+
 export const getAllNotesheetsByScope = async (req, res) => {
   try {
-    console.log(" API HIT");
-    const { empId, scope } = req.query;
+    console.log("\n===== API HIT =====");
 
+    const { empId, scope } = req.query;
     if (!empId) {
+      console.log(" Missing empId");
       return res.status(400).json({
         success: false,
         message: "Employee ID is required",
       });
     }
 
-    const employee = await Employee.findOne({ emp_id: empId });
+    //  IMPORTANT: convert to number
+    const empIdNum = Number(empId);
+    console.log("➡ empId (Number):", empIdNum);
+
+    const employee = await Employee.findOne({ emp_id: empIdNum });
+    console.log("➡ Employee:", employee);
+
     if (!employee) {
+      console.log("Employee not found");
       return res.status(404).json({
         success: false,
         message: "Employee not found",
@@ -475,12 +484,18 @@ export const getAllNotesheetsByScope = async (req, res) => {
       ? Number(employee.active_role_id)
       : null;
 
+    console.log("➡ Active Role ID:", roleId);
+
     const activeRole = roleId
       ? await Role.findOne({ role_id: roleId })
       : null;
 
-    const roleDeptIds = activeRole?.dept_ids || [];
+    console.log("➡ Active Role:", activeRole);
 
+    const roleDeptIds = activeRole?.dept_ids || [];
+    console.log("➡ Role Dept IDs:", roleDeptIds);
+
+    // Allowed scopes
     let allowedScopes = ["MY"];
 
     if (activeRole?.view_scope === "ALL") {
@@ -489,70 +504,86 @@ export const getAllNotesheetsByScope = async (req, res) => {
       allowedScopes = ["MY", "DEPARTMENT"];
     }
 
+    console.log("➡ Allowed Scopes:", allowedScopes);
+
     const appliedScope = allowedScopes.includes(scope) ? scope : "MY";
+    console.log("➡ Applied Scope:", appliedScope);
 
     let filter = {};
 
+    // =========================
+    //  MY SCOPE (FINAL FIX)
+    // =========================
     if (appliedScope === "MY") {
-      filter = roleId
-        ? { created_by_role_id: roleId }
-        : { created_by_emp_id: empId };
-    } else if (appliedScope === "DEPARTMENT") {
-      // filter = roleDeptIds.length
-      //   ? { dept_id: { $in: roleDeptIds } }
-      //   : { _id: null };
+      if (roleId) {
+        filter = {
+          $or: [
+            { created_by_emp_id: empIdNum },   // user based
+            { created_by_role_id: roleId },    // role based
+          ],
+        };
+      } else {
+        filter = { created_by_emp_id: empIdNum };
+      }
+    }
+
+    // =========================
+    //  DEPARTMENT
+    // =========================
+    else if (appliedScope === "DEPARTMENT") {
       filter =
-  viewDeptIds.length > 0
-    ? { dept_id: { $in: viewDeptIds } }
-    : { _id: null };
-    } else {
+        roleDeptIds.length > 0
+          ? { dept_id: { $in: roleDeptIds } }
+          : { _id: null };
+    }
+
+    // =========================
+    //  ALL
+    // =========================
+    else {
       filter = {};
     }
 
-    filter.status = { $ne: "APPROVED" };
 
-    console.log(" Final Filter:", filter);
-
+    //  Fetch notesheets
     const notesheets = await Notesheet.find(filter).sort({
       createdAt: -1,
     });
 
-    console.log(" Notesheets:", notesheets.length);
+    console.log(" Notesheets fetched:", notesheets.length);
+    console.log(
+      " Notesheet IDs:",
+      notesheets.map((n) => n.note_id)
+    );
 
-    //  STEP 1: sab note_ids nikaalo
+    // =========================
+    //  FLOW PROCESSING
+    // =========================
+
     const noteIds = notesheets.map((n) => n.note_id);
 
-    //  STEP 2: ek hi query me saare flows lao
     const allFlows = await NotesheetFlow.find({
       note_id: { $in: noteIds },
     }).sort({ createdAt: 1 });
 
-    console.log(" All Flows:", allFlows.length);
+    console.log(" Total flows:", allFlows.length);
 
-    //  STEP 3: mapping
-    const processedNotesheets = notesheets.map((note, index) => {
-      console.log(`\n Note ${note.note_id}`);
-
-      // note ka flow filter karo
+    const processedNotesheets = notesheets.map((note) => {
       let flow = allFlows.filter(
         (f) => f.note_id === note.note_id
       );
 
-      console.log(" Raw Flow from DB:", flow);
+      console.log(`➡ Flow for note ${note.note_id}:`, flow.length);
 
-      // reject clean
       flow = flow.filter(
         (item) =>
           item.action !== "REJECTED" ||
           item.final_status === "REJECTED"
       );
 
-
-      // current step
       const currentStep = flow.find(
         (item) => item.final_status === "PENDING"
       );
-
 
       return {
         ...note.toObject(),
@@ -561,12 +592,14 @@ export const getAllNotesheetsByScope = async (req, res) => {
       };
     });
 
+    console.log(" Final Response Count:", processedNotesheets.length);
 
     return res.status(200).json({
       success: true,
       count: processedNotesheets.length,
       data: processedNotesheets,
     });
+
   } catch (error) {
     console.error(" ERROR:", error);
 

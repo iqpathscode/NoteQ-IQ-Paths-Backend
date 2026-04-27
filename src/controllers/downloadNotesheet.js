@@ -9,12 +9,11 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 
-
+// ================= FLOW =================
 const getApprovalFlowData = async (noteId) => {
   return await NotesheetFlow.aggregate([
     { $match: { note_id: Number(noteId) } },
 
-    // ================= FROM EMPLOYEE =================
     {
       $lookup: {
         from: "employees",
@@ -25,7 +24,6 @@ const getApprovalFlowData = async (noteId) => {
     },
     { $unwind: { path: "$fromEmployee", preserveNullAndEmptyArrays: true } },
 
-    // ================= TO EMPLOYEE =================
     {
       $lookup: {
         from: "employees",
@@ -36,7 +34,6 @@ const getApprovalFlowData = async (noteId) => {
     },
     { $unwind: { path: "$toEmployee", preserveNullAndEmptyArrays: true } },
 
-    // ================= ROLE LOOKUPS =================
     {
       $lookup: {
         from: "roles",
@@ -57,60 +54,52 @@ const getApprovalFlowData = async (noteId) => {
     { $unwind: { path: "$toRole", preserveNullAndEmptyArrays: true } },
     { $unwind: { path: "$fromRole", preserveNullAndEmptyArrays: true } },
 
-    // ================= ROLE → EMPLOYEE (FIXED) =================
     {
-  $lookup: {
-    from: "employees",
-    let: { roleId: "$to_role_id" },
-    pipeline: [
-      {
-        $match: {
-          $expr: { $in: ["$$roleId", "$role_ids"] },
+      $lookup: {
+        from: "employees",
+        let: { roleId: "$to_role_id" },
+        pipeline: [
+          { $match: { $expr: { $in: ["$$roleId", "$role_ids"] } } },
+          { $limit: 1 },
+        ],
+        as: "roleEmployee",
+      },
+    },
+    { $unwind: { path: "$roleEmployee", preserveNullAndEmptyArrays: true } },
+
+    {
+      $addFields: {
+        from_name: {
+          $ifNull: [
+            "$from_emp_name",
+            "$fromEmployee.emp_name",
+            "$fromRole.role_name",
+          ],
+        },
+        to_name: {
+          $ifNull: [
+            "$to_emp_name",
+            "$toEmployee.emp_name",
+            "$roleEmployee.emp_name",
+            "$toRole.role_name",
+          ],
+        },
+        from_role_name: {
+          $ifNull: [
+            "$fromRole.role_name",
+            "$fromEmployee.active_role_name",
+            "Employee",
+          ],
+        },
+        to_role_name: {
+          $ifNull: [
+            "$toRole.role_name",
+            "$roleEmployee.active_role_name",
+            "Employee",
+          ],
         },
       },
-      { $sort: { emp_id: 1 } },
-      { $limit: 1 },
-    ],
-    as: "roleEmployee",
-  },
-},
-{ $unwind: { path: "$roleEmployee", preserveNullAndEmptyArrays: true } },
-
-    // ================= FINAL FIELDS =================
-   {
-  $addFields: {
-    from_name: {
-      $ifNull: [
-        "$from_emp_name",
-        "$fromEmployee.emp_name",
-        "$fromRole.role_name",
-      ],
     },
-
-    to_name: {
-      $ifNull: [
-        "$to_emp_name",
-        "$toEmployee.emp_name",
-        "$roleEmployee.emp_name",
-        "$toRole.role_name",
-      ],
-    },
-
-    from_role_name: {
-      $ifNull: [
-        "$fromRole.role_name",
-        "$fromEmployee.active_role_name",
-      ],
-    },
-
-    to_role_name: {
-      $ifNull: [
-        "$toRole.role_name",
-        "$roleEmployee.active_role_name",
-      ],
-    },
-  },
-},
 
     {
       $project: {
@@ -127,115 +116,111 @@ const getApprovalFlowData = async (noteId) => {
     { $sort: { createdAt: 1 } },
   ]);
 };
+
 // ================= PDF =================
 const generatePDFBuffer = async (noteId) => {
   return new Promise(async (resolve) => {
     try {
       const margin = 70;
       const doc = new PDFDocument({ margin });
-      const buffers = [];
+      doc.lineGap(3);
 
+      const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       const notesheet = await Notesheet.findOne({ note_id: Number(noteId) });
       if (!notesheet) return resolve(null);
 
-      // ================= CREATOR =================
       const creator = await Employee.findOne({
         emp_id: notesheet.created_by_emp_id,
       });
-
-      const role = await Role.findOne({
-        role_id: creator?.active_role_id,
-      });
-
+      const role = await Role.findOne({ role_id: creator?.active_role_id });
       const department = await Department.findOne({
         dept_id: creator?.dept_id,
       });
-
-      const school = await School.findOne({
-        school_id: creator?.school_id,
-      });
+      const school = await School.findOne({ school_id: creator?.school_id });
 
       const flow = await getApprovalFlowData(noteId);
-
       const pageWidth = doc.page.width - margin * 2;
 
-      // ================= HEADER =================
+      // ===== HEADER =====
       const logoPath = path.join(process.cwd(), "src", "assets", "newLogo.png");
-
       if (fs.existsSync(logoPath)) {
         doc.image(logoPath, margin, 40, { width: 100 });
       }
 
-      doc.font("Helvetica-Bold").fontSize(16)
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(16)
         .text("NOTESHEET", 0, 45, { align: "center" });
 
-      doc.font("Helvetica").fontSize(10)
+      doc
+        .font("Helvetica")
+        .fontSize(10)
         .text(
           `Date: ${new Date(notesheet.createdAt).toLocaleString("en-IN")}`,
           margin,
           45,
-          { align: "right" }
+          { align: "right" },
         );
 
       doc.moveDown(3);
 
-      // ================= BASIC DETAILS =================
+      // ===== DETAILS =====
       doc.font("Helvetica-Bold").text("Basic Details:");
       doc.moveDown(0.5);
 
       doc.font("Helvetica");
-
       doc.text(`Created By: ${creator?.emp_name || "-"}`);
-      doc.text(`Role: ${role?.role_name || "-"}`);
+      doc.text(`Role: ${role?.role_name || "Employee"}`);
       doc.text(`Designation: ${creator?.designation || "-"}`);
 
-      //  hide if null (important for higher authority)
-      if (department?.dept_name) {
+      if (department?.dept_name)
         doc.text(`Department: ${department.dept_name}`);
-      }
-
-      if (school?.school_name) {
-        doc.text(`School: ${school.school_name}`);
-      }
+      if (school?.school_name) doc.text(`School: ${school.school_name}`);
 
       doc.moveDown(0.5);
 
       doc.text(`Notesheet ID: ${notesheet.note_id}`);
       doc.text(`Status: ${notesheet.status}`);
       doc.text(
-        `Created At: ${new Date(notesheet.createdAt).toLocaleString("en-IN")}`
+        `Created At: ${new Date(notesheet.createdAt).toLocaleString("en-IN")}`,
       );
 
       doc.moveDown();
 
-      // ================= SUBJECT =================
-      doc.font("Helvetica-Bold")
+      // ===== SUBJECT =====
+      doc
+        .font("Helvetica-Bold")
         .text("Subject: ", { continued: true })
         .font("Helvetica")
         .text(notesheet.subject);
 
       doc.moveDown();
 
-      // ================= DESCRIPTION =================
+      // ===== DESCRIPTION =====
       doc.font("Helvetica-Bold").text("Description:");
-      doc.moveDown(0.5);
-      doc.font("Helvetica")
-        .text(notesheet.description || "-", {
-          width: pageWidth,
-          align: "justify",
-        });
 
+      doc.font("Helvetica").text(notesheet.description || "-", {
+        width: pageWidth,
+        align: "justify",
+        lineGap: 4,
+        paragraphGap: 6,
+      });
       doc.moveDown();
-
       doc.text("The note is submitted for kind approval and necessary action.");
-
       doc.moveDown(2);
 
-      // ================= APPROVAL FLOW =================
+      // ===== FLOW =====
       doc.font("Helvetica-Bold").text("Approval Flow");
+      doc.moveDown();
+
+      doc
+        .moveTo(margin, doc.y)
+        .lineTo(margin + pageWidth, doc.y)
+        .stroke();
+
       doc.moveDown();
 
       if (flow.length === 0) {
@@ -245,26 +230,33 @@ const generatePDFBuffer = async (noteId) => {
           const fromName = f.from_name || "Unknown";
           const toName = f.to_name || "N/A";
 
-          const fromRole = f.from_role_name || "-";
-          const toRole = f.to_role_name || "-";
+          const fromRole = f.from_role_name || "Employee";
+          const toRole = f.to_role_name || "Employee";
+
+          const actionLower = String(f.action).toLowerCase();
 
           const remarkText = Array.isArray(f.remark)
             ? f.remark.join(", ")
             : f.remark;
 
-          //  MAIN LINE (FINAL FIXED FORMAT)
-          doc.font("Helvetica-Bold")
-            .text(
-              `${i + 1}. ${fromName} (${fromRole}) → ${toName} (${toRole})`
-            );
+          // ===== MAIN =====
+          doc
+            .font("Helvetica-Bold")
+            .text(`${i + 1}. ${fromName} (${fromRole})`);
 
-          doc.font("Helvetica")
-            .text(
-              `Action: ${f.action} | Date: ${new Date(
-                f.createdAt
-              ).toLocaleString("en-IN")}`
-            );
+          // ONLY when not approved/rejected
+          if (!["approved", "rejected"].includes(actionLower)) {
+            doc.font("Helvetica").text(`Forwarded To: ${toName} (${toRole})`);
+          }
 
+          // ===== ACTION =====
+          doc
+            .font("Helvetica-Bold")
+            .text(`Action: ${f.action}`, { continued: true })
+            .font("Helvetica")
+            .text(` | Date: ${new Date(f.createdAt).toLocaleString("en-IN")}`);
+
+          // ===== REMARK =====
           if (remarkText) {
             doc.text(`Remark: ${remarkText}`);
           }
@@ -272,48 +264,61 @@ const generatePDFBuffer = async (noteId) => {
           doc.moveDown();
         });
       }
-
-      doc.moveDown(2);
-
-      // ================= SIGNATURE =================
-      const rightX = margin + pageWidth / 2;
-      const lastFlow = flow.length ? flow[flow.length - 1] : null;
-
-      doc.font("Helvetica-Bold")
-        .text(
-          lastFlow?.to_name || lastFlow?.to_role_name || "Pending",
-          rightX,
-          doc.y,
-          { width: pageWidth / 2, align: "right" }
+      // ===== FINAL SIGNATURE =====
+      const finalAction = flow
+        .slice()
+        .reverse()
+        .find((f) =>
+          ["approved", "rejected"].includes(String(f.action).toLowerCase()),
         );
 
-      doc.font("Helvetica")
-        .text(lastFlow?.to_role_name || "", {
+      if (finalAction) {
+        doc.moveDown(2);
+
+        const rightX = margin + pageWidth / 2;
+
+        // NAME (approver)
+        doc
+          .font("Helvetica-Bold")
+          .text(finalAction.from_name || "-", rightX, doc.y, {
+            width: pageWidth / 2,
+            align: "right",
+          });
+
+        // ROLE (approver role)
+        doc.font("Helvetica").text(finalAction.from_role_name || "Employee", {
           width: pageWidth / 2,
           align: "right",
         });
+      }
 
+      // ===== ATTACHMENTS =====
       doc.moveDown(2);
 
-      // ================= ATTACHMENT =================
-      doc.font("Helvetica-Bold")
-        .text("Attachment:", rightX, doc.y, {
-          width: pageWidth / 2,
-          align: "right",
-        });
+      doc.font("Helvetica-Bold").text("Attachments:", {
+        width: pageWidth / 2,
+        align: "right",
+      });
 
       doc.moveDown(0.5);
 
-      if (notesheet.attachment) {
-        doc.fillColor("blue")
-          .text("Click to view", {
-            link: notesheet.attachment,
+      if (notesheet.attachments?.length) {
+        notesheet.attachments.forEach((file, i) => {
+          doc.fillColor("blue").text(`Attachment ${i + 1}`, {
+            link: file,
             underline: true,
+            width: pageWidth / 2,
             align: "right",
           });
+
+          doc.moveDown(0.3);
+        });
         doc.fillColor("black");
       } else {
-        doc.text("No attachment", { align: "right" });
+        doc.text("No attachment", {
+          width: pageWidth / 2,
+          align: "right",
+        });
       }
 
       doc.end();
@@ -326,51 +331,35 @@ const generatePDFBuffer = async (noteId) => {
 
 // ================= DOWNLOAD =================
 export const downloadNotesheet = async (req, res) => {
-  try {
-    const pdfBuffer = await generatePDFBuffer(req.params.id);
+  const pdfBuffer = await generatePDFBuffer(req.params.id);
 
-    if (!pdfBuffer) return res.status(404).send("Not found");
+  if (!pdfBuffer) return res.status(404).send("Not found");
 
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=notesheet_${req.params.id}.pdf`
-    );
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename=notesheet_${req.params.id}.pdf`,
+  );
 
-    res.send(pdfBuffer);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
-  }
+  res.send(pdfBuffer);
 };
 
 // ================= BULK =================
 export const bulkDownload = async (req, res) => {
-  try {
-    const { ids } = req.body;
+  const { ids } = req.body;
 
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=notesheets.zip"
-    );
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", "attachment; filename=notesheets.zip");
 
-    const archive = archiver("zip");
-    archive.pipe(res);
+  const archive = archiver("zip");
+  archive.pipe(res);
 
-    for (const id of ids) {
-      const pdfBuffer = await generatePDFBuffer(id);
-
-      if (pdfBuffer) {
-        archive.append(pdfBuffer, {
-          name: `notesheet_${id}.pdf`,
-        });
-      }
+  for (const id of ids) {
+    const pdfBuffer = await generatePDFBuffer(id);
+    if (pdfBuffer) {
+      archive.append(pdfBuffer, { name: `notesheet_${id}.pdf` });
     }
-
-    archive.finalize();
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
   }
+
+  archive.finalize();
 };
