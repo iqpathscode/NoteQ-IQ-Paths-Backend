@@ -6,164 +6,166 @@ import Role from "../models/userPowers/role.model.js";
 import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import Power from "../models/userPowers/power.model.js";
 
-export const createNotesheet = async (req, res) => {
-  try {
-    const {
-      emp_id,
-      dept_id,
-      subject,
-      description,
-      forward_to_role,
-      attachment,
-      mode,
-    } = req.body;
+// export const createNotesheet = async (req, res) => {
+//   try {
+//     const {
+//       emp_id,
+//       dept_id,
+//       subject,
+//       category,
+//       priority,
+//       description,
+//       forward_to_role,
+//       attachments,
+//       mode,
+//     } = req.body;
 
-    // ------------------- VALIDATIONS -------------------
-    const sender = await Employee.findOne({ emp_id });
-    if (!sender)
-      return res
-        .status(404)
-        .json({ success: false, message: "Sender not found" });
+//     // ------------------- VALIDATIONS -------------------
+//     const sender = await Employee.findOne({ emp_id });
+//     if (!sender)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Sender not found" });
 
-    const department = await Department.findOne({ dept_id });
-    if (!department)
-      return res
-        .status(404)
-        .json({ success: false, message: "Department not found" });
+//     const department = await Department.findOne({ dept_id });
+//     if (!department)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Department not found" });
 
-    let forward_to_role_id = null;
-    let forward_to_dept_id = null;
-    let level = null;
+//     let forward_to_role_id = null;
+//     let forward_to_dept_id = null;
+//     let level = null;
 
-    // ------------------- HANDLE ROLE -------------------
-    let roleId = null;
-    let roleName = "Employee"; // default
-    let employeeLevel = 0;     // default
+//     // ------------------- HANDLE ROLE -------------------
+//     let roleId = null;
+//     let roleName = "Employee"; // default
+//     let employeeLevel = 0;     // default
 
-    if (sender.active_role_id) {
-      const activeRole = await Role.findOne({ role_id: sender.active_role_id });
-      if (activeRole) {
-        roleId = activeRole.role_id;
-        roleName = activeRole.role_name;
-        const power = await Power.findOne({ power_id: activeRole.power_id });
-        if (power) employeeLevel = power.power_level;
-      }
-    }
-    // agar role nahi hai → Employee default, power_level 0, roleId null
+//     if (sender.active_role_id) {
+//       const activeRole = await Role.findOne({ role_id: sender.active_role_id });
+//       if (activeRole) {
+//         roleId = activeRole.role_id;
+//         roleName = activeRole.role_name;
+//         const power = await Power.findOne({ power_id: activeRole.power_id });
+//         if (power) employeeLevel = power.power_level;
+//       }
+//     }
+//     // agar role nahi hai → Employee default, power_level 0, roleId null
 
-    // ------------------- DIRECT MODE -------------------
-    if (Number(mode) === 1) {
-      if (!forward_to_role)
-        return res.status(400).json({
-          success: false,
-          message: "forward_to_role is required in direct mode",
-        });
+//     // ------------------- DIRECT MODE -------------------
+//     if (Number(mode) === 1) {
+//       if (!forward_to_role)
+//         return res.status(400).json({
+//           success: false,
+//           message: "forward_to_role is required in direct mode",
+//         });
 
-      const role = await Role.findOne({ role_id: Number(forward_to_role) });
-      if (!role)
-        return res
-          .status(404)
-          .json({ success: false, message: "Target role not found" });
-      if (!role.canReceiveNotesheet)
-        return res.status(403).json({
-          success: false,
-          message: "This role cannot receive notesheets",
-        });
+//       const role = await Role.findOne({ role_id: Number(forward_to_role) });
+//       if (!role)
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "Target role not found" });
+//       if (!role.canReceiveNotesheet)
+//         return res.status(403).json({
+//           success: false,
+//           message: "This role cannot receive notesheets",
+//         });
 
-      const power = await Power.findOne({ power_id: role.power_id });
-      if (!power)
-        return res
-          .status(404)
-          .json({ success: false, message: "Power not found for role" });
+//       const power = await Power.findOne({ power_id: role.power_id });
+//       if (!power)
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "Power not found for role" });
 
-      forward_to_role_id = role.role_id;
-      forward_to_dept_id = dept_id;
-      level = power.power_level;
-    }
+//       forward_to_role_id = role.role_id;
+//       forward_to_dept_id = dept_id;
+//       level = power.power_level;
+//     }
 
-    // ------------------- CHAIN MODE -------------------
-    if (Number(mode) === 0) {
-      const roles = await Role.find({
-        dept_ids: { $in: [Number(dept_id)] },
-        canReceiveNotesheet: true,
-      });
+//     // ------------------- CHAIN MODE -------------------
+//     if (Number(mode) === 0) {
+//       const roles = await Role.find({
+//         dept_ids: { $in: [Number(dept_id)] },
+//         canReceiveNotesheet: true,
+//       });
 
-      let roleWithLevel = [];
-      for (let r of roles) {
-        const power = await Power.findOne({ power_id: r.power_id });
-        if (power)
-          roleWithLevel.push({ ...r.toObject(), power_level: power.power_level });
-      }
+//       let roleWithLevel = [];
+//       for (let r of roles) {
+//         const power = await Power.findOne({ power_id: r.power_id });
+//         if (power)
+//           roleWithLevel.push({ ...r.toObject(), power_level: power.power_level });
+//       }
 
-      roleWithLevel.sort((a, b) => a.power_level - b.power_level);
-      const nextRole = roleWithLevel.find((r) => r.power_level > employeeLevel);
+//       roleWithLevel.sort((a, b) => a.power_level - b.power_level);
+//       const nextRole = roleWithLevel.find((r) => r.power_level > employeeLevel);
 
-      if (!nextRole)
-        return res.status(404).json({
-          success: false,
-          message: "You are at highest level, no next approver",
-        });
+//       if (!nextRole)
+//         return res.status(404).json({
+//           success: false,
+//           message: "You are at highest level, no next approver",
+//         });
 
-      forward_to_role_id = nextRole.role_id;
-      forward_to_dept_id = dept_id;
-      level = nextRole.power_level;
-    }
+//       forward_to_role_id = nextRole.role_id;
+//       forward_to_dept_id = dept_id;
+//       level = nextRole.power_level;
+//     }
 
-    if (!level)
-      return res.status(400).json({
-        success: false,
-        message: "Level missing. Cannot create notesheet flow.",
-      });
+//     if (!level)
+//       return res.status(400).json({
+//         success: false,
+//         message: "Level missing. Cannot create notesheet flow.",
+//       });
 
-    // ------------------- COUNTER -------------------
-    const counter = await Counter.findOneAndUpdate(
-      { name: "note_id" },
-      { $inc: { seq: 1 } },
-      { new: true, upsert: true }
-    );
+//     // ------------------- COUNTER -------------------
+//     const counter = await Counter.findOneAndUpdate(
+//       { name: "note_id" },
+//       { $inc: { seq: 1 } },
+//       { new: true, upsert: true }
+//     );
 
-    // ------------------- CREATE NOTESHEET -------------------
-    const notesheet = await Notesheet.create({
-      note_id: counter.seq,
-      emp_id,
-      dept_id,
-      subject,
-      description,
-      forward_to_role_id,
-      forward_to_dept_id,
-      created_by_emp_id: sender.emp_id,
-      created_by_role_id: roleId, // null allowed if no role
-      attachment,
-      mode: Number(mode),
-      level,
-      status: "PENDING",
-    });
+//     // ------------------- CREATE NOTESHEET -------------------
+//     const notesheet = await Notesheet.create({
+//       note_id: counter.seq,
+//       emp_id,
+//       dept_id,
+//       subject,
+//       description,
+//       forward_to_role_id,
+//       forward_to_dept_id,
+//       created_by_emp_id: sender.emp_id,
+//       created_by_role_id: roleId, // null allowed if no role
+//       attachments,
+//       mode: Number(mode),
+//       level,
+//       status: "PENDING",
+//     });
 
-    // ------------------- CREATE FLOW -------------------
-    await NotesheetFlow.create({
-      note_id: notesheet.note_id,
-      from_emp_id: emp_id,
-      to_role_id: forward_to_role_id,
-      to_emp_id: null, // current holder optional
-      action: "CREATED",
-      remark: null,
-      level,
-    });
+//     // ------------------- CREATE FLOW -------------------
+//     await NotesheetFlow.create({
+//       note_id: notesheet.note_id,
+//       from_emp_id: emp_id,
+//       to_role_id: forward_to_role_id,
+//       to_emp_id: null, // current holder optional
+//       action: "CREATED",
+//       remark: null,
+//       level,
+//     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Notesheet created successfully",
-      data: notesheet,
-    });
-  } catch (error) {
-    console.error("Create Notesheet Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
+//     return res.status(201).json({
+//       success: true,
+//       message: "Notesheet created successfully",
+//       data: notesheet,
+//     });
+//   } catch (error) {
+//     console.error("Create Notesheet Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
 
 // export const forwardChainOnly = async (req, res) => {
 //   try {
@@ -216,7 +218,6 @@ export const createNotesheet = async (req, res) => {
 //       });
 //     }
 
-    
 //     // Step 2: Fetch role + employee + power
 //     const [employee, role] = await Promise.all([
 //       Employee.findOne({ emp_id: user.emp_id }),
@@ -247,7 +248,7 @@ export const createNotesheet = async (req, res) => {
 //       notesheet.level = userPowerLevel;
 //       notesheet.forward_to_role_id = role.role_id;
 
-//       ensureCreatedFields(notesheet, userRoleId); 
+//       ensureCreatedFields(notesheet, userRoleId);
 //       await notesheet.save();
 //     }
 
@@ -309,7 +310,6 @@ export const createNotesheet = async (req, res) => {
 //       }
 //     }
 
-    
 //     // Step 5: Dropdown
 //     if (!forward_to_role) {
 //       const allRoles = await Role.find({
@@ -396,6 +396,210 @@ export const createNotesheet = async (req, res) => {
 //   }
 // };
 
+export const createNotesheet = async (req, res) => {
+  try {
+    const {
+      emp_id,
+      dept_id,
+      subject,
+      category,
+      priority,
+      description,
+      forward_to_role,
+      attachments,
+      attachment,
+      mode,
+    } = req.body;
+
+    // ------------------- NORMALIZE ATTACHMENTS -------------------
+    let finalAttachments = [];
+
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      finalAttachments = attachments;
+    }
+
+    console.log("FINAL ATTACHMENTS:", finalAttachments);
+    // ------------------- VALIDATIONS -------------------
+    const sender = await Employee.findOne({ emp_id });
+    if (!sender)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sender not found" });
+
+    const department = await Department.findOne({ dept_id });
+    if (!department)
+      return res
+        .status(404)
+        .json({ success: false, message: "Department not found" });
+
+    if (!category) {
+      return res.status(400).json({
+        success: false,
+        message: "Category is required",
+      });
+    }
+
+    if (!priority) {
+      return res.status(400).json({
+        success: false,
+        message: "Priority is required",
+      });
+    }
+
+    let forward_to_role_id = null;
+    let forward_to_dept_id = null;
+    let level = null;
+
+    // ------------------- HANDLE ROLE -------------------
+    let roleId = null;
+    let roleName = "Employee";
+    let employeeLevel = 0;
+
+    if (sender.active_role_id) {
+      const activeRole = await Role.findOne({
+        role_id: sender.active_role_id,
+      });
+
+      if (activeRole) {
+        roleId = activeRole.role_id;
+        roleName = activeRole.role_name;
+
+        const power = await Power.findOne({
+          power_id: activeRole.power_id,
+        });
+
+        if (power) employeeLevel = power.power_level;
+      }
+    }
+
+    // ------------------- DIRECT MODE -------------------
+    if (Number(mode) === 1) {
+      if (!forward_to_role) {
+        return res.status(400).json({
+          success: false,
+          message: "forward_to_role is required in direct mode",
+        });
+      }
+
+      const role = await Role.findOne({
+        role_id: Number(forward_to_role),
+      });
+
+      if (!role)
+        return res
+          .status(404)
+          .json({ success: false, message: "Target role not found" });
+
+      if (!role.canReceiveNotesheet)
+        return res.status(403).json({
+          success: false,
+          message: "This role cannot receive notesheets",
+        });
+
+      const power = await Power.findOne({ power_id: role.power_id });
+
+      if (!power)
+        return res
+          .status(404)
+          .json({ success: false, message: "Power not found for role" });
+
+      forward_to_role_id = role.role_id;
+      forward_to_dept_id = dept_id;
+      level = power.power_level;
+    }
+
+    // ------------------- CHAIN MODE -------------------
+    if (Number(mode) === 0) {
+      const roles = await Role.find({
+        dept_ids: { $in: [Number(dept_id)] },
+        canReceiveNotesheet: true,
+      });
+
+      let roleWithLevel = [];
+
+      for (let r of roles) {
+        const power = await Power.findOne({ power_id: r.power_id });
+        if (power) {
+          roleWithLevel.push({
+            ...r.toObject(),
+            power_level: power.power_level,
+          });
+        }
+      }
+
+      roleWithLevel.sort((a, b) => a.power_level - b.power_level);
+
+      const nextRole = roleWithLevel.find((r) => r.power_level > employeeLevel);
+
+      if (!nextRole)
+        return res.status(404).json({
+          success: false,
+          message: "You are at highest level, no next approver",
+        });
+
+      forward_to_role_id = nextRole.role_id;
+      forward_to_dept_id = dept_id;
+      level = nextRole.power_level;
+    }
+
+    if (!level)
+      return res.status(400).json({
+        success: false,
+        message: "Level missing. Cannot create notesheet flow.",
+      });
+
+    // ------------------- COUNTER -------------------
+    const counter = await Counter.findOneAndUpdate(
+      { name: "note_id" },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true },
+    );
+
+    // ------------------- CREATE NOTESHEET -------------------
+    const notesheet = await Notesheet.create({
+      note_id: counter.seq,
+      emp_id,
+      dept_id,
+      subject,
+      description,
+      category,
+      priority,
+      forward_to_role_id,
+      forward_to_dept_id,
+      created_by_emp_id: sender.emp_id,
+      created_by_role_id: roleId,
+      attachments: finalAttachments,
+      mode: Number(mode),
+      level,
+      status: "PENDING",
+    });
+
+    // ------------------- CREATE FLOW -------------------
+    await NotesheetFlow.create({
+      note_id: notesheet.note_id,
+      from_emp_id: emp_id,
+      to_role_id: forward_to_role_id,
+      to_emp_id: null,
+      action: "CREATED",
+      remark: null,
+      level,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Notesheet created successfully",
+      data: notesheet,
+    });
+  } catch (error) {
+    console.error("Create Notesheet Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 export const forwardChainOnly = async (req, res) => {
   try {
     console.log("===== Forward Chain Start =====");
@@ -408,23 +612,32 @@ export const forwardChainOnly = async (req, res) => {
         notesheet.created_by_emp_id = notesheet.emp_id;
       }
 
-      if (!notesheet.created_by_role_id) {
-        notesheet.created_by_role_id = userRoleId;
-      }
+      // if (!notesheet.created_by_role_id) {
+      //   notesheet.created_by_role_id = userRoleId;
+      // }
+      //     if (notesheet.created_by_role_id === undefined) {
+      // notesheet.created_by_role_id = userRoleId;
+      // }
     };
 
     // Step 0: Active Role
+    // const userRoleId =
+    //   user.active_role_id ||
+    //   user.role_id ||
+    //   (await Employee.findOne({ emp_id: user.emp_id }))?.active_role_id;
+
+    // if (!userRoleId) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "User role not found",
+    //   });
+    // }
+    // allow employees without role
     const userRoleId =
       user.active_role_id ||
       user.role_id ||
-      (await Employee.findOne({ emp_id: user.emp_id }))?.active_role_id;
-
-    if (!userRoleId) {
-      return res.status(400).json({
-        success: false,
-        message: "User role not found",
-      });
-    }
+      (await Employee.findOne({ emp_id: user.emp_id }))?.active_role_id ||
+      null;
 
     // Step 1: FETCH NOTESHEET
     const notesheet = await Notesheet.findOne({
@@ -492,79 +705,77 @@ export const forwardChainOnly = async (req, res) => {
       allRoles.map(async (r) => {
         const p = await Power.findOne({ power_id: r.power_id });
         return { role: r, power: p };
-      })
+      }),
     );
 
     const nextAutoRole = rolesWithPower
       .filter(
         (rp) =>
           rp.power?.power_type === "APPROVAL" &&
-          rp.power.power_level > notesheet.level
+          rp.power.power_level > notesheet.level,
       )
       .sort((a, b) => a.power.power_level - b.power.power_level)[0];
 
-   // ======================================================
-//  CASE 1: AUTO FLOW (CHAIN CONTINUOUS)
-// ======================================================
-if (!forward_to_role) {
+    // ======================================================
+    //  CASE 1: AUTO FLOW (CHAIN CONTINUOUS)
+    // ======================================================
+    if (!forward_to_role) {
+      let currentNotesheet = notesheet;
+      let nextAutoRole = null;
 
-  let currentNotesheet = notesheet;
-  let nextAutoRole = null;
+      while (true) {
+        const rolesWithPower = await Promise.all(
+          allRoles.map(async (r) => {
+            const p = await Power.findOne({ power_id: r.power_id });
+            return { role: r, power: p };
+          }),
+        );
 
-  while (true) {
+        nextAutoRole = rolesWithPower
+          .filter(
+            (rp) =>
+              rp.power?.power_type === "APPROVAL" &&
+              rp.power.power_level > currentNotesheet.level,
+          )
+          .sort((a, b) => a.power.power_level - b.power.power_level)[0];
 
-    const rolesWithPower = await Promise.all(
-      allRoles.map(async (r) => {
-        const p = await Power.findOne({ power_id: r.power_id });
-        return { role: r, power: p };
-      })
-    );
+        if (!nextAutoRole) break;
 
-    nextAutoRole = rolesWithPower
-      .filter(
-        (rp) =>
-          rp.power?.power_type === "APPROVAL" &&
-          rp.power.power_level > currentNotesheet.level
-      )
-      .sort((a, b) => a.power.power_level - b.power.power_level)[0];
+        const nr = nextAutoRole.role;
+        const np = nextAutoRole.power;
 
-    if (!nextAutoRole) break;
+        currentNotesheet.forward_to_role_id = nr.role_id;
+        currentNotesheet.forward_to_dept_id = user.dept_id;
+        currentNotesheet.level = np.power_level;
 
-    const nr = nextAutoRole.role;
-    const np = nextAutoRole.power;
+        await currentNotesheet.save();
 
-    currentNotesheet.forward_to_role_id = nr.role_id;
-    currentNotesheet.forward_to_dept_id = user.dept_id;
-    currentNotesheet.level = np.power_level;
+        await NotesheetFlow.create({
+          note_id: currentNotesheet.note_id,
+          from_emp_id: user.emp_id,
+          from_emp_name: employee?.emp_name || "Unknown User",
+          from_role_id: userRoleId,
+          from_role_name: role.role_name,
+          to_emp_id: null,
+          to_emp_name: null,
+          to_role_id: nr.role_id,
+          to_role_name: nr.role_name,
+          to_dept_id: user.dept_id,
+          action: "FORWARDED",
+          remark: remark || null,
+          level: np.power_level,
+          final_status: "PENDING",
+        });
 
-    await currentNotesheet.save();
+        // continue loop until no next role
+      }
 
-    await NotesheetFlow.create({
-      note_id: currentNotesheet.note_id,
-      from_emp_id: user.emp_id,
-      from_emp_name: employee?.emp_name || "Unknown User",
-      from_role_id: userRoleId,
-      from_role_name: role.role_name,
-      to_emp_id: null,
-      to_emp_name: null,
-      to_role_id: nr.role_id,
-      to_role_name: nr.role_name,
-      to_dept_id: user.dept_id,
-      action: "FORWARDED",
-      remark: remark || null,
-      level: np.power_level,
-      final_status: "PENDING",
-    });
-
-    // continue loop until no next role
-  }
-
-  return res.json({
-    success: true,
-    mode: "AUTO",
-    message: "Auto chain completed",
-  });
-}
+      return res.json({
+        success: true,
+        mode: "AUTO",
+        message: "Auto chain completed",
+      });
+    }
 
     // ======================================================
     //  CASE 2: NO AUTO ROLE → MANUAL SELECTION
@@ -604,8 +815,7 @@ if (!forward_to_role) {
     });
 
     notesheet.forward_to_role_id = nextRole.role_id;
-    notesheet.forward_to_dept_id =
-      nextRole.dept_ids?.[0] || user.dept_id;
+    notesheet.forward_to_dept_id = nextRole.dept_ids?.[0] || user.dept_id;
 
     notesheet.level = nextPower?.power_level || notesheet.level;
 
@@ -648,18 +858,17 @@ export const getEligibleRoles = async (req, res) => {
     const { note_id, mode } = req.query;
     const user = req.user;
 
-    // fetch all roles that can receive notesheet
     let roles = await Role.find({ canReceiveNotesheet: true });
 
-    // fetch power and dept info manually
     const powers = await Power.find();
     const depts = await Department.find();
 
-    // enrich roles with power_level and dept_name
+    //  Enrich roles with power + dept
     roles = roles.map((r) => {
       const power = powers.find((p) => p.power_id === r.power_id);
+
       const deptNames = r.dept_ids.map(
-        (dId) => depts.find((d) => d.dept_id === dId)?.dept_name || "Dept"
+        (dId) => depts.find((d) => d.dept_id === dId)?.dept_name || "Dept",
       );
 
       return {
@@ -669,41 +878,121 @@ export const getEligibleRoles = async (req, res) => {
       };
     });
 
+    /* =========================
+       DIRECT MODE
+    ========================== */
     if (mode === "direct") {
-      // exclude user's own role
-      roles = roles.filter((r) => r.role_id !== user.active_role_id);
-    } else if (mode === "chain") {
-      const notesheet = await Notesheet.findOne({ note_id: Number(note_id) });
-      if (!notesheet)
-        return res
-          .status(404)
-          .json({ success: false, message: "Notesheet not found" });
 
-      // filter eligible roles
-      roles = roles.filter((r) => {
-        // higher-level global roles: dept irrelevant
-        if (r.dept_ids.length === 0) {
-          return r.power_level > (notesheet.level || 0);
-        }
-        // normal roles: must match dept and higher power
-        return (
-          r.power_level > (notesheet.level || 0) &&
-          r.dept_ids.includes(user.dept_id)
-        );
+      const filtered = roles.filter((r) => r.role_id !== user.active_role_id);
+
+      return res.json({
+        success: true,
+        count: filtered.length,
+        data: filtered,
       });
     }
 
-    console.log("Eligible roles:", roles);
+    /* =========================
+       CHAIN MODE
+    ========================== */
+    if (mode === "chain") {
+      console.log("CHAIN MODE");
 
-    return res.json({
-      success: true,
-      count: roles.length,
-      data: roles,
+      const notesheet = await Notesheet.findOne({
+        note_id: Number(note_id),
+      });
+
+      if (!notesheet) {
+        console.log("Notesheet NOT FOUND");
+        return res.status(404).json({
+          success: false,
+          message: "Notesheet not found",
+        });
+      }
+
+      const currentLevel = notesheet.level || 0;
+      const currentRoleId = notesheet.forward_to_role_id;
+
+      console.log("Notesheet:", {
+        level: currentLevel,
+        forward_to_role_id: currentRoleId,
+        dept_id: notesheet.dept_id,
+      });
+
+      const AUTO_FORWARD_LIMIT = 1;
+
+      /* =========================
+         AUTO FORWARD STAGE
+      ========================== */
+      if (currentLevel <= AUTO_FORWARD_LIMIT) {
+        console.log("AUTO FORWARD STAGE (dropdown disabled)");
+
+        return res.json({
+          success: true,
+          count: 0,
+          data: [],
+        });
+      }
+
+      /* =========================
+         MANUAL SELECTION STAGE
+      ========================== */
+      console.log("MANUAL SELECTION STAGE");
+
+      const flowEntries = await NotesheetFlow.find({
+        note_id: Number(note_id),
+        action: "FORWARDED",
+      });
+
+      const alreadyForwardedRoleIds = flowEntries.map(
+        (flow) => flow.to_role_id,
+      );
+
+      console.log("Already forwarded roles:", alreadyForwardedRoleIds);
+
+      let filteredRoles = roles.filter((r) => {
+        if (r.role_id === currentRoleId) return false;
+        if (alreadyForwardedRoleIds.includes(r.role_id)) return false;
+        if (r.power_level < currentLevel) return false;
+
+        if (!r.dept_ids || r.dept_ids.length === 0) return true;
+
+        return r.dept_ids.includes(notesheet.dept_id);
+      });
+
+      filteredRoles = filteredRoles.sort(
+        (a, b) => a.power_level - b.power_level,
+      );
+
+      console.log(
+        "Final Eligible Roles:",
+        filteredRoles.map((r) => ({
+          role_id: r.role_id,
+          role_name: r.role_name,
+          power_level: r.power_level,
+        })),
+      );
+
+      return res.json({
+        success: true,
+        count: filteredRoles.length,
+        data: filteredRoles,
+      });
+    }
+
+    /* =========================
+       INVALID MODE
+    ========================== */
+    return res.status(400).json({
+      success: false,
+      message: "Invalid mode",
     });
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
+    console.error("ERROR in getEligibleRoles:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
