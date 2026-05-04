@@ -1,6 +1,7 @@
 import Department from "../models/office/department.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 import School from "../models/office/school.model.js";
+import Employee from "../models/user/employee.model.js";
 
 const departmentListPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -154,7 +155,6 @@ export const deleteDepartment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -162,8 +162,7 @@ export const deleteDepartment = async (req, res) => {
       });
     }
 
-    // Check if department exists
-    const department = await Department.findOne({ dept_id: id });
+    const department = await Department.findOne({ dept_id: Number(id) });
 
     if (!department) {
       return res.status(404).json({
@@ -172,8 +171,20 @@ export const deleteDepartment = async (req, res) => {
       });
     }
 
-    // Delete
-    await Department.deleteOne({ dept_id: id });
+    // ✅ Correct dependency check
+    const employeeExists = await Employee.exists({
+      dept_id: Number(id),
+    });
+
+    if (employeeExists) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete department. It is assigned to employees.",
+      });
+    }
+
+    await Department.deleteOne({ dept_id: Number(id) });
 
     return res.status(200).json({
       success: true,

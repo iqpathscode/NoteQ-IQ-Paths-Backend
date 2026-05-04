@@ -343,7 +343,7 @@ export const deleteRole = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate
+    // 1. Validate
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -351,8 +351,10 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    // Check if role exists
-    const role = await Role.findOne({ role_id: id });
+    const roleId = Number(id);
+
+    // 2. Check if role exists
+    const role = await Role.findOne({ role_id: roleId });
 
     if (!role) {
       return res.status(404).json({
@@ -361,18 +363,21 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    // Optional (IMPORTANT): check if role assigned to employees
-    // (agar Employee model me roles store hote hain)
-    // const isUsed = await Employee.findOne({ "roles.role_id": Number(id) });
-    // if (isUsed) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Cannot delete role. It is assigned to employees.",
-    //   });
-    // }
+    // ✅ 3. MOST IMPORTANT: check employee dependency
+    const employeeExists = await Employee.exists({
+      role_ids: roleId,
+    });
 
-    // Delete
-    await Role.deleteOne({ role_id: id });
+    if (employeeExists) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete role. It is assigned to one or more employees.",
+      });
+    }
+
+    // 4. Delete
+    await Role.deleteOne({ role_id: roleId });
 
     return res.status(200).json({
       success: true,

@@ -2,15 +2,22 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import Employee from "../../models/user/employee.model.js";
 import { env } from "../../config/env.config.js";
-import { generateEmpId } from "../../utility/generateEmpID.js";
+import { generateEmpId } from "../../utility/generateEmpId.js";
 import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
 import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
+import crypto from "crypto";
+
+
+import sgMail from "@sendgrid/mail";
+
+sgMail.setApiKey(env.SENDGRID_API_KEY);
+
 
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe } = req.body;
 
     // Step 1: Check Admin first
     const admin = await Admin.findOne({ email });
@@ -37,11 +44,20 @@ export const login = async (req, res) => {
       admin.last_login = new Date();
       await admin.save();
 
+      // res.cookie("token", token, {
+      //   httpOnly: true,
+      //   secure: false, // production me HTTPS ke liye true rakho
+      //   sameSite: "strict",
+      // });
+
       res.cookie("token", token, {
-        httpOnly: true,
-        secure: false, // production me HTTPS ke liye true rakho
-        sameSite: "strict",
-      });
+  httpOnly: true,
+  secure: true,       // MUST in production (Render + Vercel)
+  sameSite: "none" ,   // IMPORTANT for cross-site cookies
+   maxAge: rememberMe
+      ? 7 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000,
+});
 
       return res.status(200).json({
         success: true,
@@ -86,11 +102,16 @@ export const login = async (req, res) => {
     user.last_login = new Date();
     await user.save();
 
+    // res.cookie("token", token, {
+    //   httpOnly: true,
+    //   secure: false,
+    //   sameSite: "strict",
+    // });
     res.cookie("token", token, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "strict",
-    });
+  httpOnly: true,
+  secure: true,       //  production me MUST
+  sameSite: "none"    //  cross-origin ke liye
+});
 
     const isDefaultPassword = await bcrypt.compare(
       "iqpaths@123",
@@ -328,4 +349,186 @@ export const createUserByAdmin = async (req, res) => {
       message: err.message || "Something went wrong",
     });
   }
+};
+
+export const createUserService = async (data, deptMap) => {
+
+  //  normalize keys
+  const normalizedData = {};
+  Object.keys(data).forEach(key => {
+    const cleanKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+    normalizedData[cleanKey] = data[key];
+  });
+
+  const emp_name = normalizedData.emp_name || normalizedData.employee_name;
+  const designation = normalizedData.designation;
+  const mobile_number = normalizedData.mobile_number;
+  const email = normalizedData.email;
+  const dept_name = normalizedData.dept_name || normalizedData.department;
+
+  //  clean values
+  const empNameClean = emp_name?.toString().trim();
+  const designationClean = designation?.toString().trim();
+  const mobileClean = mobile_number?.toString().trim();
+  const emailClean = email?.toString().trim().toLowerCase();
+  const deptNameClean = dept_name?.toString().trim().toLowerCase();
+
+  if (!empNameClean || !designationClean || !mobileClean || !emailClean || !deptNameClean) {
+    throw new Error("Missing required fields");
+  }
+
+  const dept = deptMap.get(deptNameClean);
+
+  if (!dept) {
+    throw new Error(`Invalid department: ${dept_name}`);
+  }
+
+  const existing = await Employee.findOne({
+    $or: [{ email: emailClean }, { mobile_number: mobileClean }],
+  });
+
+  if (existing) {
+    throw new Error("User already exists");
+  }
+
+  const emp_id = await generateEmpId();
+  const hashedPassword = await bcrypt.hash("iqpaths@123", 10);
+
+  const user = await Employee.create({
+    emp_id,
+    emp_name: empNameClean,
+    designation: designationClean,
+    mobile_number: mobileClean,
+    email: emailClean,
+    dept_id: dept.dept_id,
+    school_id: dept.school_id,
+    password: hashedPassword,
+    role_ids: [],
+    active_role_id: null,
+  });
+
+  return user;
+};
+
+export const logout = async (req, res) => {
+  try {
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: true, // production me true
+      sameSite: "Strict",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Logout failed",
+    });
+  }
+};
+
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  const user = await Employee.findOne({ email });
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const resetToken = crypto.randomBytes(32).toString("hex");
+  const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+  user.resetToken = hashedToken;
+  user.resetTokenExpiry = Date.now() + 3600000;
+  await user.save();
+
+  const resetURL = `${env.FRONTEND_URL}/reset-password/${resetToken}`;
+  console.log("Reset URL:", resetURL); //  DEBUG PURPOSE ONLY - REMOVE IN PRODUCTION
+
+  try {
+    await sgMail.send({
+  to: user.email,
+  from: "IQ Paths <info@iqpaths.com>",
+  subject: "Reset Your Password - IQ Paths",
+  html: `
+  <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 20px;">
+    <div style="max-width: 600px; margin: auto; background: #ffffff; padding: 30px; border-radius: 10px;">
+
+      <h2 style="color: #2563eb; text-align: center;">
+        Password Reset Request
+      </h2>
+
+      <p style="font-size: 14px; color: #333;">
+        Hello <strong>${user.emp_name || "User"}</strong>,
+      </p>
+
+      <p style="font-size: 14px; color: #555;">
+        We received a request to reset your password for your <strong>NoteQ</strong> account.
+      </p>
+
+      <p style="font-size: 14px; color: #555;">
+        Click the button below to reset your password:
+      </p>
+
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="${resetURL}" 
+           style="background-color: #2563eb; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Reset Password
+        </a>
+      </div>
+
+      <p style="font-size: 13px; color: #777;">
+        This link will expire in <strong>1 hour</strong>.
+      </p>
+
+      <p style="font-size: 13px; color: #777;">
+        If you did not request a password reset, you can safely ignore this email.
+      </p>
+
+      <hr style="margin: 20px 0;" />
+
+      <p style="font-size: 12px; color: #aaa; text-align: center;">
+        © ${new Date().getFullYear()} IQ Paths. All rights reserved.
+      </p>
+
+    </div>
+  </div>
+  `,
+});
+
+    res.status(200).json({ message: "Reset link sent to email" });
+  } catch (err) {
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    await user.save();
+
+    res.status(500).json({ message: "Failed to send email" });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { newPassword } = req.body;
+
+  if (!newPassword) {
+    return res.status(400).json({ message: "New password is required" });
+  }
+
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+  const user = await Employee.findOne({
+    resetToken: hashedToken,
+    resetTokenExpiry: { $gt: Date.now() },
+  });
+
+  if (!user)
+    return res.status(400).json({ message: "Invalid or expired link" });
+
+  user.password = await bcrypt.hash(newPassword, 10);
+  user.resetToken = undefined;
+  user.resetTokenExpiry = undefined;
+  await user.save();
+
+  res.status(200).json({ message: "Password reset successful" });
 };

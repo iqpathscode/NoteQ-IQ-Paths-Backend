@@ -2,6 +2,7 @@
 import Power from "../models/userPowers/power.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 import Employee from "../models/user/employee.model.js"; // ensure correct path
+import Role from "../models/userPowers/role.model.js"; // ensure correct path
 
 const powerListPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -158,7 +159,7 @@ export const deletePower = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate
+    // 1. Validate
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -166,8 +167,10 @@ export const deletePower = async (req, res) => {
       });
     }
 
-    // Check if power exists
-    const power = await Power.findOne({ power_id: id });
+    const powerId = Number(id);
+
+    // 2. Check if power exists
+    const power = await Power.findOne({ power_id: powerId });
 
     if (!power) {
       return res.status(404).json({
@@ -176,20 +179,19 @@ export const deletePower = async (req, res) => {
       });
     }
 
-    //  Optional but IMPORTANT: check if used in Employee roles
-    const isUsed = await Employee.findOne({
-      "roles.power_id": Number(id),
-    });
+    // ✅ 3. MOST IMPORTANT: check role dependency
+    const roleExists = await Role.exists({ power_id: powerId });
 
-    if (isUsed) {
+    if (roleExists) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete power. It is assigned to employees.",
+        message:
+          "Cannot delete power. It is assigned to one or more roles.",
       });
     }
 
-    // Delete
-    await Power.deleteOne({ power_id: id });
+    // 4. Delete (only if safe)
+    await Power.deleteOne({ power_id: powerId });
 
     return res.status(200).json({
       success: true,
