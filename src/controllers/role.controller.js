@@ -251,9 +251,9 @@ export const assignPowerToRole = async (req, res) => {
           : r
       );
 
-      if (emp.active_role?.role_id === role.role_id) {
-        emp.active_role.power_level = power.power_level;
-        emp.active_role.power_type = power.power_type;
+      if (emp.active_role_id?.role_id === role.role_id) {
+        emp.active_role_id.power_level = power.power_level;
+        emp.active_role_id.power_type = power.power_type;
       }
 
       await emp.save();
@@ -306,37 +306,7 @@ export const assignDeptToRole = async (req, res) => {
   }
 };
 
-// Update Departments of Role
-// export const updateDeptOfRole = async (req, res) => {
-//   try {
-//     const { role_id, dept_ids } = req.body;
-//     if (!role_id || !dept_ids || dept_ids.length === 0) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Role and Departments required" });
-//     }
 
-//     const role = await Role.findOne({ role_id });
-//     if (!role) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Role not found" });
-//     }
-
-//     role.dept_ids = dept_ids;
-//     await role.save();
-
-//     return res.json({
-//       success: true,
-//       message: "Departments updated for role successfully!",
-//     });
-//   } catch (error) {
-//     console.error("Update Dept Error:", error);
-//     return res
-//       .status(500)
-//       .json({ success: false, message: "Internal server error" });
-//   }
-// };
 export const updateDeptOfRole = async (req, res) => {
   try {
     const { role_id, dept_ids, view_dept_ids } = req.body;

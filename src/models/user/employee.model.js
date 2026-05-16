@@ -40,6 +40,9 @@ const employeeSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    signature: {
+      type: String,
+    },
     resetToken: {
       type: String,
       default: null,
