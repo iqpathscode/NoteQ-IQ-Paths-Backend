@@ -5,7 +5,6 @@ import Role from "../models/userPowers/role.model.js";
 import Department from "../models/office/department.model.js";
 import School from "../models/office/school.model.js";
 import archiver from "archiver";
-import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 

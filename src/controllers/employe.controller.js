@@ -161,97 +161,6 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
   }
 };
 
-// export const assignRoleToFaculty = async (req, res) => {
-//   try {
-//     const { emp_id, role_name, dept_id } = req.body;
-
-//     // 1. Validate
-//     if (!emp_id || !role_name) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Employee ID and Role Name are required",
-//       });
-//     }
-
-//     // 2. Find Employee
-//     const employee = await Employee.findOne({ emp_id: Number(emp_id) });
-
-//     if (!employee) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Employee not found",
-//       });
-//     }
-
-//     // 3. Find Role (case-insensitive + dept match)
-//     const roleExists = await Role.findOne({
-//       role_name: { $regex: new RegExp(`^${role_name}$`, "i") },
-//       $or: [
-//         { dept_ids: Number(dept_id) },
-//         { dept_ids: { $size: 0 } }
-//       ],
-//     });
-
-//     if (!roleExists) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Role not found",
-//       });
-//     }
-
-//     const roleId = roleExists.role_id;
-
-//     //  4. STRICT UNIQUE CHECK (MOST IMPORTANT)
-//     const roleAlreadyAssigned = await Employee.exists({
-//       role_ids: roleId,
-//       emp_id: { $ne: Number(emp_id) }, // exclude current employee
-//     });
-
-//     if (roleAlreadyAssigned) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "This role is already assigned to another employee",
-//       });
-//     }
-
-//     //  5. DUPLICATE CHECK (same employee)
-//     if (employee.role_ids?.includes(roleId)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Employee already has this role",
-//       });
-//     }
-
-//     //  6. ASSIGN ROLE
-//     const updatedEmployee = await Employee.findOneAndUpdate(
-//       { emp_id: Number(emp_id) },
-//       {
-//         $addToSet: { role_ids: roleId },
-//         $set: {
-//           active_role_id: employee.active_role_id || roleId,
-//         },
-//       },
-//       { new: true }
-//     );
-
-//     return res.status(200).json({
-//       success: true,
-//       message: `Role "${roleExists.role_name}" assigned successfully`,
-//       data: updatedEmployee,
-//     });
-
-//   } catch (error) {
-//     console.error("Assign Role Error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error assigning role",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// Update Role of Faculty
-
 
 export const assignRoleToFaculty = async (req, res) => {
   try {
@@ -318,7 +227,6 @@ export const assignRoleToFaculty = async (req, res) => {
 
     //  CASE 2: School Level (Dean)
     if (power.scope === "SCHOOL") {
-
       //  Fetch departments of role
       const roleDepartments = await Department.find({
         dept_id: { $in: roleDeptIds },
@@ -377,7 +285,7 @@ export const assignRoleToFaculty = async (req, res) => {
           active_role_id: employee.active_role_id || roleId,
         },
       },
-      { new: true }
+      { new: true },
     );
 
     return res.status(200).json({
@@ -385,7 +293,6 @@ export const assignRoleToFaculty = async (req, res) => {
       message: `Role "${roleExists.role_name}" assigned successfully`,
       data: updatedEmployee,
     });
-
   } catch (error) {
     console.error("Assign Role Error:", error);
     return res.status(500).json({
@@ -395,7 +302,6 @@ export const assignRoleToFaculty = async (req, res) => {
     });
   }
 };
-
 
 export const updateRoleOfFaculty = async (req, res) => {
   try {
@@ -444,7 +350,7 @@ export const updateRoleOfFaculty = async (req, res) => {
     }
 
     // ---------------- Update active_role ----------------
-    employee.active_role = {
+    employee.active_role_id = {
       role_id: role.role_id,
       role_name: role.role_name,
       dept_id: role.dept_id,
@@ -457,10 +363,10 @@ export const updateRoleOfFaculty = async (req, res) => {
     const index = employee.roles.findIndex((r) => r.role_id === role.role_id);
     if (index !== -1) {
       // Replace existing role
-      employee.roles[index] = employee.active_role;
+      employee.roles[index] = employee.active_role_id;
     } else {
       // Add new role if missing
-      employee.roles.push(employee.active_role);
+      employee.roles.push(employee.active_role_id);
     }
 
     await employee.save();
@@ -558,41 +464,8 @@ export const switchEmployeeRole = async (req, res) => {
   }
 };
 
-// export const transferRole = async (req, res) => {
-//   try {
-//     let { roleId, newUserId } = req.body;
-//     const roleIdNum = Number(roleId);
 
-//     // CURRENT USER
-//     const currentUser = await Employee.findOne({ role_ids: roleIdNum });
-//     if (currentUser) {
-//       currentUser.role_ids = currentUser.role_ids.filter(r => r !== roleIdNum);
-//       if (currentUser.active_role_id === roleIdNum) currentUser.active_role_id = null;
-//       await currentUser.save();
-//     }
 
-//     // NEW USER
-//     const newUser = await Employee.findOne({ emp_id: newUserId });
-//     if (!newUser) return res.status(404).json({ success: false, message: "New user not found" });
-
-//     if (!newUser.role_ids) newUser.role_ids = [];
-//     if (!newUser.role_ids.includes(roleIdNum)) newUser.role_ids.push(roleIdNum);
-//     newUser.active_role_id = roleIdNum;
-//     await newUser.save();
-
-//     //  OPTIONAL: Log NotesheetFlow update for new holder
-//     await NotesheetFlow.updateMany(
-//       { to_role_id: roleIdNum, to_emp_id: null }, // unassigned flows
-//       { $set: { to_emp_id: newUserId } }
-//     );
-
-//     return res.status(200).json({ success: true, message: "Role transferred successfully" });
-
-//   } catch (err) {
-//     console.error("transferRole Error:", err);
-//     return res.status(500).json({ success: false, message: err.message });
-//   }
-// };
 
 export const transferRole = async (req, res) => {
   try {
@@ -675,10 +548,10 @@ export const transferRole = async (req, res) => {
     //  REMOVE FROM CURRENT USER
     // =========================================================
     const currentUser = await Employee.findOne({ role_ids: roleIdNum });
-console.log("Current User:", currentUser);
+    console.log("Current User:", currentUser);
     if (currentUser) {
       currentUser.role_ids = currentUser.role_ids.filter(
-        (r) => r !== roleIdNum
+        (r) => r !== roleIdNum,
       );
 
       if (currentUser.active_role_id === roleIdNum) {
@@ -710,14 +583,13 @@ console.log("Current User:", currentUser);
     // =========================================================
     await NotesheetFlow.updateMany(
       { to_role_id: roleIdNum, to_emp_id: null },
-      { $set: { to_emp_id: newUserId } }
+      { $set: { to_emp_id: newUserId } },
     );
 
     return res.status(200).json({
       success: true,
       message: "Role transferred successfully",
     });
-
   } catch (err) {
     console.error("transferRole Error:", err);
     return res.status(500).json({
@@ -726,52 +598,7 @@ console.log("Current User:", currentUser);
     });
   }
 };
-// ================= GET PROFILE =================
-// export const getProfile = async (req, res) => {
-//   try {
-//     const empId = req.user.emp_id;
 
-//     const employee = await Employee.findOne({ emp_id: empId }).select("-password");
-
-//     if (!employee) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Employee not found",
-//       });
-//     }
-
-//     //  manual fetch (NO populate)
-//     const department = await Department.findOne({
-//       dept_id: employee.dept_id,
-//     });
-
-//     const school = await School.findOne({
-//       school_id: employee.school_id,
-//     });
-
-//     res.status(200).json({
-//       success: true,
-//       data: {
-//         ...employee.toObject(),
-
-//         //  frontend ke liye same structure bana diya
-//         department: department
-//           ? { name: department.dept_name }
-//           : null,
-
-//         school: school
-//           ? { name: school.school_name }
-//           : null,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Profile Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Server Error",
-//     });
-//   }
-// };
 
 export const getProfile = async (req, res) => {
   try {
@@ -833,16 +660,11 @@ export const getProfile = async (req, res) => {
         //  ADD THIS (IMPORTANT)
         name: employee.emp_name,
 
-        department: department
-          ? { name: department.dept_name }
-          : null,
+        department: department ? { name: department.dept_name } : null,
 
-        school: school
-          ? { name: school.school_name }
-          : null,
+        school: school ? { name: school.school_name } : null,
       },
     });
-
   } catch (error) {
     console.error("Profile Error:", error);
     res.status(500).json({
@@ -852,19 +674,28 @@ export const getProfile = async (req, res) => {
   }
 };
 
+
 export const updateProfile = async (req, res) => {
   try {
-    const { mobile_number, designation } = req.body; 
+    const { mobile_number, designation } = req.body;
 
-    //  ADMIN FLOW
+    // SIGNATURE URL
+    let signature = undefined;
+
+    if (req.file) {
+      signature = req.file.secure_url || req.file.path;
+    }
+
+    // ================= ADMIN FLOW =================
     if (req.user.isAdmin) {
       const updatedAdmin = await Admin.findOneAndUpdate(
         { admin_id: req.user.admin_id },
         {
           mobile_number,
           designation,
+          ...(signature && { signature }),
         },
-        { new: true }
+        { new: true },
       ).select("-password");
 
       if (!updatedAdmin) {
@@ -885,13 +716,15 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    //  EMPLOYEE FLOW
+    // ================= EMPLOYEE FLOW =================
     const updatedEmployee = await Employee.findOneAndUpdate(
       { emp_id: req.user.emp_id },
       {
         mobile_number,
-        designation,      },
-      { new: true }
+        designation,
+        ...(signature && { signature }),
+      },
+      { new: true },
     ).select("-password");
 
     if (!updatedEmployee) {
@@ -905,6 +738,7 @@ export const updateProfile = async (req, res) => {
       updatedEmployee.dept_id
         ? Department.findOne({ dept_id: updatedEmployee.dept_id })
         : null,
+
       updatedEmployee.school_id
         ? School.findOne({ school_id: updatedEmployee.school_id })
         : null,
@@ -921,6 +755,7 @@ export const updateProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Error:", error);
+
     res.status(500).json({
       success: false,
       message: "Update failed",

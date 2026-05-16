@@ -35,6 +35,10 @@ import {
   createNotesheet,
   getEligibleRoles,
   forwardChainOnly,
+  getExecutionNotesheets,
+  forwardExecutionNotesheet,
+  completeExecutionNotesheet,
+  getNotesheetForRef,
 } from "../controllers/createNote.controller.js";
 
 // Roles
@@ -76,6 +80,7 @@ import {
   getApprovalFlow,
   getRecentNotesheets,
   getAllNotesheetsByScope,
+  getDepartmentsByRole,
 } from "../controllers/notesheet.controller.js";
 
 // Actions
@@ -89,6 +94,7 @@ import {
   getQueriesByNoteId,
   forwardNotesheetDirect,
   getProcessedNotesheets,
+  getApprovedNotesheetsByRole,
 } from "../controllers/notesheetAction.controller.js";
 
 // Upload
@@ -110,10 +116,19 @@ import {
   createNotification,
   getNotifications,
   deleteNotification,
+  markAsRead,
 } from "../controllers/notification.controller.js";
 
 // Middleware
 import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
+
+import {
+  createNotesheetHeader,
+  getActiveNotesheetHeader,
+  getAllNotesheetHeaders,
+  updateNotesheetHeader,
+  deleteNotesheetHeader,
+} from "../controllers/notesheetHeader.controller.js";
 
 const router = express.Router();
 
@@ -175,8 +190,12 @@ router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
 router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.put("/transfer-role", authenticate, transferRole);
 router.get("/profile", authenticate, getProfile);
-router.put("/update-profile", authenticate, updateProfile);
-
+router.put(
+  "/update-profile",
+  authenticate,
+  upload.single("signature"),
+  updateProfile
+);
 
 // ======================== EMPLOYEES ========================
 router.get("/employees", authenticate, getEmployeesWithDetails);
@@ -186,12 +205,18 @@ router.get(
   authenticate,
   getEmployeeNotesheetSummary
 );
+router.get(
+  "/notesheets/approved",
+  authenticate,
+  getApprovedNotesheetsByRole
+);
 
 
 // ======================== NOTESHEET ========================
-
 // Create
 router.post("/notesheet", authenticate, createNotesheet);
+router.get("/notesheets/execution", authenticate, getExecutionNotesheets);
+router.get("/notesheet/for-ref", authenticate, getNotesheetForRef);
 
 // LIST (clean grouping)
 router.get("/notesheets", authenticate, getAllNotesheets);
@@ -201,6 +226,7 @@ router.get("/notesheets/received", authenticate, getReceivedNotesheets);
 router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
 router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
 router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
+router.get("/departments/by-role", getDepartmentsByRole);
 
 // Nested
 router.get(
@@ -258,6 +284,17 @@ router.get(
   getQueriesByNoteId
 );
 
+router.put(
+  "/notesheets/:noteId/forward-execution",
+  authenticate,
+  forwardExecutionNotesheet
+);
+
+router.put(
+  "/notesheets/:noteId/complete-execution",
+  authenticate,
+  completeExecutionNotesheet
+);
 
 // ======================== DOWNLOAD ========================
 router.get(
@@ -272,11 +309,38 @@ router.post(
   bulkDownload
 );
 
+router.post(
+  "/notesheet/headers",
+  upload.fields([
+    { name: "left_logo", maxCount: 1 },
+    { name: "right_logo", maxCount: 1 },
+  ]),
+  createNotesheetHeader
+);
+
+router.put(
+  "/notesheet/headers/:id",
+  upload.fields([
+    { name: "left_logo", maxCount: 1 },
+    { name: "right_logo", maxCount: 1 },
+  ]),
+  updateNotesheetHeader
+);
+router.get("/notesheet/headers/active", getActiveNotesheetHeader);
+router.get("/notesheet/headers", getAllNotesheetHeaders);
+// router.put("/notesheet/headers/:id", updateNotesheetHeader);
+router.delete("/notesheet/headers/:id", deleteNotesheetHeader);
 
 // ======================== NOTIFICATIONS ========================
 router.post("/notifications", authenticate, createNotification);
 
 router.get("/notifications", authenticate, getNotifications);
+
+router.patch(
+  "/notifications/read/:id",
+  authenticate,
+  markAsRead
+);
 
 router.delete(
   "/notifications/:id",

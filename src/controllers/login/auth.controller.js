@@ -9,11 +9,9 @@ import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
 import crypto from "crypto";
 
-
 import sgMail from "@sendgrid/mail";
 
 sgMail.setApiKey(env.SENDGRID_API_KEY);
-
 
 export const login = async (req, res) => {
   try {
@@ -51,13 +49,11 @@ export const login = async (req, res) => {
       // });
 
       res.cookie("token", token, {
-  httpOnly: true,
-  secure: true,       // MUST in production (Render + Vercel)
-  sameSite: "none" ,   // IMPORTANT for cross-site cookies
-   maxAge: rememberMe
-      ? 7 * 24 * 60 * 60 * 1000
-      : 24 * 60 * 60 * 1000,
-});
+        httpOnly: true,
+        secure: true, // MUST in production (Render + Vercel)
+        sameSite: "none", // IMPORTANT for cross-site cookies
+        maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
+      });
 
       return res.status(200).json({
         success: true,
@@ -108,10 +104,10 @@ export const login = async (req, res) => {
     //   sameSite: "strict",
     // });
     res.cookie("token", token, {
-  httpOnly: true,
-  secure: true,       //  production me MUST
-  sameSite: "none"    //  cross-origin ke liye
-});
+      httpOnly: true,
+      secure: true, //  production me MUST
+      sameSite: "none", //  cross-origin ke liye
+    });
 
     const isDefaultPassword = await bcrypt.compare(
       "iqpaths@123",
@@ -120,18 +116,18 @@ export const login = async (req, res) => {
 
     // Dynamic flag from Power table
     const rolePower = await Power.findOne({
-  power_id: user.active_role?.power_id
-});
+      power_id: user.active_role?.power_id,
+    });
 
     return res.status(200).json({
-  success: true,
-  message: "User login successful",
-  role_id: user.active_role?.role_id,
-  dept_id: user.dept_id,
-  isAdmin: false,
-  isDefaultPassword,
-  canReceiveNotesheet: user.active_role?.canReceiveNotesheet || false,
-});
+      success: true,
+      message: "User login successful",
+      role_id: user.active_role?.role_id,
+      dept_id: user.dept_id,
+      isAdmin: false,
+      isDefaultPassword,
+      canReceiveNotesheet: user.active_role?.canReceiveNotesheet || false,
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -233,12 +229,12 @@ export const getMe = async (req, res) => {
     }).lean();
 
     const powers = await Power.find({
-      power_id: { $in: roles.map(r => r.power_id) },
+      power_id: { $in: roles.map((r) => r.power_id) },
     }).lean();
 
     //  Merge power into roles
-    const rolesWithPower = roles.map(role => {
-      const power = powers.find(p => p.power_id === role.power_id);
+    const rolesWithPower = roles.map((role) => {
+      const power = powers.find((p) => p.power_id === role.power_id);
       return {
         ...role,
         power_level: power?.power_level || 1,
@@ -248,7 +244,7 @@ export const getMe = async (req, res) => {
 
     //  ACTIVE ROLE
     const activeRole = rolesWithPower.find(
-      r => r.role_id === employee.active_role_id
+      (r) => r.role_id === employee.active_role_id,
     );
 
     return res.json({
@@ -260,11 +256,10 @@ export const getMe = async (req, res) => {
         isAdmin: false,
         role_ids: employee.role_ids,
 
-        roles: rolesWithPower,  //  FIXED
+        roles: rolesWithPower, //  FIXED
         active_role: activeRole || null,
 
-        canReceiveNotesheet:
-          activeRole?.canReceiveNotesheet || false,
+        canReceiveNotesheet: activeRole?.canReceiveNotesheet || false,
       },
     });
   } catch (error) {
@@ -295,7 +290,10 @@ export const createUserByAdmin = async (req, res) => {
     //  CLEAN VALUES (IMPORTANT )
     const cleanName = emp_name.toString().trim();
     const cleanEmail = email.toString().trim().toLowerCase();
-    const cleanMobile = mobile_number.toString().replace(/\D/g, "").slice(0, 10);
+    const cleanMobile = mobile_number
+      .toString()
+      .replace(/\D/g, "")
+      .slice(0, 10);
 
     //  Format validation
     if (!nameRegex.test(cleanName)) {
@@ -396,10 +394,7 @@ export const createUserService = async (data, deptMap) => {
   //  Clean values (IMPORTANT )
   const empNameClean = emp_name?.toString().trim();
   const designationClean = designation?.toString().trim();
-  const mobileClean = mobile_number
-    ?.toString()
-    .replace(/\D/g, "")
-    .slice(0, 10);
+  const mobileClean = mobile_number?.toString().replace(/\D/g, "").slice(0, 10);
   const emailClean = email?.toString().trim().toLowerCase();
   const deptNameClean = dept_name?.toString().trim().toLowerCase();
 
@@ -483,25 +478,24 @@ export const logout = async (req, res) => {
   }
 };
 
-
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
   console.log("Incoming email:", email);
- let user = await Employee.findOne({ email });
- console.log("Employee found:", user);
- let userType = "employee";    
+  let user = await Employee.findOne({ email });
+  console.log("Employee found:", user);
+  let userType = "employee";
 
-if (!user) {
-  user = await Admin.findOne({ email });
+  if (!user) {
+    user = await Admin.findOne({ email });
     console.log("Admin found:", user);
-  userType = "admin";
-}
+    userType = "admin";
+  }
 
-if (!user) {
-  console.log("User not found in both collections");
-  return res.status(404).json({ message: "User not found" });
-}
+  if (!user) {
+    console.log("User not found in both collections");
+    return res.status(404).json({ message: "User not found" });
+  }
 
   const resetToken = crypto.randomBytes(32).toString("hex");
   const hashedToken = crypto
@@ -518,10 +512,10 @@ if (!user) {
 
   try {
     await sgMail.send({
-  to: user.email,
-  from: "IQ Paths <info@iqpaths.com>",
-  subject: "Reset Your Password - IQ Paths",
-  html: `
+      to: user.email,
+      from: "IQ Paths <info@iqpaths.com>",
+      subject: "Reset Your Password - IQ Paths",
+      html: `
   <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 20px;">
     <div style="max-width: 600px; margin: auto; background: #ffffff; padding: 30px; border-radius: 10px;">
 
@@ -565,7 +559,7 @@ if (!user) {
     </div>
   </div>
   `,
-});
+    });
 
     res.status(200).json({ message: "Reset link sent to email" });
   } catch (err) {
@@ -576,9 +570,6 @@ if (!user) {
     res.status(500).json({ message: "Failed to send email" });
   }
 };
-
-
-
 
 export const resetPassword = async (req, res) => {
   const { token } = req.params;
@@ -592,21 +583,18 @@ export const resetPassword = async (req, res) => {
   //  Normalize type (important fix)
   const normalizedType = type?.toLowerCase()?.trim();
 
- console.log("TOKEN FROM URL:", token);
+  console.log("TOKEN FROM URL:", token);
 
-const hashedToken = crypto
-  .createHash("sha256")
-  .update(token)
-  .digest("hex");
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-console.log("HASHED TOKEN:", hashedToken);
+  console.log("HASHED TOKEN:", hashedToken);
 
-//  direct DB check (without expiry)
-const adminUser = await Admin.findOne({ resetToken: hashedToken });
-const empUser = await Employee.findOne({ resetToken: hashedToken });
+  //  direct DB check (without expiry)
+  const adminUser = await Admin.findOne({ resetToken: hashedToken });
+  const empUser = await Employee.findOne({ resetToken: hashedToken });
 
-console.log("ADMIN USER:", adminUser);
-console.log("EMP USER:", empUser);
+  console.log("ADMIN USER:", adminUser);
+  console.log("EMP USER:", empUser);
 
   let user;
 
@@ -648,7 +636,3 @@ console.log("EMP USER:", empUser);
 
   res.status(200).json({ message: "Password reset successful" });
 };
-
-
-
-
