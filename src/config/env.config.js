@@ -12,4 +12,6 @@ export const env = {
   FRONTEND_URL:process.env.FRONTEND_URL,
   SENDGRID_API_KEY:process.env.SENDGRID_API_KEY,
   EMAIL_USER: process.env.EMAIL_USER,
+  ADMIN_SECRET_KEY: process.env.ADMIN_SECRET_KEY,
+  REDIS_URL: process.env.REDIS_URL,
 }

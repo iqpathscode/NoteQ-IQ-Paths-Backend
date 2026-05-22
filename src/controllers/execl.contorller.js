@@ -1,7 +1,7 @@
 import xlsx from "xlsx";
 import Employee from "../models/user/employee.model.js";
 import Department from "../models/office/department.model.js";
-import { createUserService } from "../controllers/login/auth.controller.js";
+import { createUserService } from "../controllers/userController.js";
 
 export const bulkSignup = async (req, res) => {
   try {

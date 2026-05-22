@@ -161,7 +161,6 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
   }
 };
 
-
 export const assignRoleToFaculty = async (req, res) => {
   try {
     const { emp_id, role_name } = req.body;
@@ -464,9 +463,6 @@ export const switchEmployeeRole = async (req, res) => {
   }
 };
 
-
-
-
 export const transferRole = async (req, res) => {
   try {
     let { roleId, newUserId } = req.body;
@@ -599,7 +595,6 @@ export const transferRole = async (req, res) => {
   }
 };
 
-
 export const getProfile = async (req, res) => {
   try {
     console.log("USER FROM TOKEN:", req.user);
@@ -674,7 +669,6 @@ export const getProfile = async (req, res) => {
   }
 };
 
-
 export const updateProfile = async (req, res) => {
   try {
     const { mobile_number, designation } = req.body;
@@ -684,6 +678,13 @@ export const updateProfile = async (req, res) => {
 
     if (req.file) {
       signature = req.file.secure_url || req.file.path;
+    }
+
+    if (!req.file && !existingSignature) {
+      return res.status(400).json({
+        success: false,
+        message: "Signature is required",
+      });
     }
 
     // ================= ADMIN FLOW =================
