@@ -8,6 +8,7 @@ import Power from "../../models/userPowers/power.model.js";
 import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
 import crypto from "crypto";
+import redis from "../../config/redis.config.js";
 
 import sgMail from "@sendgrid/mail";
 
@@ -47,11 +48,11 @@ export const login = async (req, res) => {
       //   secure: false, // production me HTTPS ke liye true rakho
       //   sameSite: "strict",
       // });
-
+      const isProduction = process.env.NODE_ENV === "production";
       res.cookie("token", token, {
         httpOnly: true,
-        secure: true, // MUST in production (Render + Vercel)
-        sameSite: "none", // IMPORTANT for cross-site cookies
+        secure: isProduction, // ✅ localhost pe false, production pe true
+        sameSite: isProduction ? "none" : "lax", // ✅ localhost pe lax, production pe none
         maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
       });
 
@@ -161,6 +162,7 @@ export const changePassword = async (req, res) => {
 
     // Hash new password
     user.password = await bcrypt.hash(newPassword, 10);
+    user.isDefaultPassword = false; // ← ADD THIS
     await user.save();
 
     res.status(200).json({
@@ -254,8 +256,8 @@ export const getMe = async (req, res) => {
         emp_name: employee.emp_name,
         dept_id: employee.dept_id,
         isAdmin: false,
+        isDefaultPassword: employee.isDefaultPassword ?? true,
         role_ids: employee.role_ids,
-
         roles: rolesWithPower, //  FIXED
         active_role: activeRole || null,
 
@@ -460,18 +462,33 @@ export const createUserService = async (data, deptMap) => {
 
 export const logout = async (req, res) => {
   try {
+    const token = req.cookies.token;
+
+    if (token) {
+      // Token ki remaining expiry nikalo
+      const decoded = jwt.decode(token);
+      const expirySeconds = decoded.exp - Math.floor(Date.now() / 1000);
+
+      if (expirySeconds > 0) {
+        // Redis mein blacklist karo — token expire hone tak
+        await redis.setex(`blacklist:${token}`, expirySeconds, "true");
+      }
+    }
+
+    const isProduction = process.env.NODE_ENV === "production";
+
     res.clearCookie("token", {
       httpOnly: true,
-      secure: true, // production me true
-      sameSite: "Strict",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Logged out successfully",
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Logout failed",
     });
