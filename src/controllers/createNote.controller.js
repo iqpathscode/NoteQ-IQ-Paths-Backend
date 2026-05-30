@@ -46,12 +46,10 @@ export const createNotesheet = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Department not found" });
     if (!category || !priority) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Category and Priority are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Category and Priority are required",
+      });
     }
 
     // ---- SENDER ROLE ----
@@ -115,12 +113,10 @@ export const createNotesheet = async (req, res) => {
         .sort((a, b) => a.power.power_level - b.power.power_level);
 
       if (!eligible.length) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message: "No next approver role found above your level",
-          });
+        return res.status(404).json({
+          success: false,
+          message: "No next approver role found above your level",
+        });
       }
 
       const best = eligible[0];
@@ -213,13 +209,11 @@ export const createNotesheet = async (req, res) => {
     // })
     // .catch((err) => console.error("Mail error:", err));
 
-    return res
-      .status(201)
-      .json({
-        success: true,
-        message: "Notesheet created successfully",
-        data: notesheet,
-      });
+    return res.status(201).json({
+      success: true,
+      message: "Notesheet created successfully",
+      data: notesheet,
+    });
   } catch (error) {
     console.error("CREATE NOTESHEET ERROR:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -591,8 +585,8 @@ export const getExecutionNotesheets = async (req, res) => {
       forward_to_role_id: roleId,
       status: "IN_EXECUTION",
       lifecycle_status: "OPEN",
+      is_deleted: { $ne: true },
     };
-
     // ================= FETCH NOTESHEETS =================
     const notesheets = await Notesheet.find(query)
       .sort({ updatedAt: -1 })
@@ -1082,5 +1076,86 @@ export const getNotesheetForRef = async (req, res) => {
       success: false,
       message: "Internal server error while fetching notesheets",
     });
+  }
+};
+
+// createNote.controller.js
+export const deleteNotesheet = async (req, res) => {
+  try {
+    const { note_id } = req.params;
+    const emp_id = req.user?.emp_id; // ✅ from authenticate middleware, not req.body
+
+    if (!emp_id)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const notesheet = await Notesheet.findOne({ note_id });
+
+    if (!notesheet)
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
+
+    if (notesheet.created_by_emp_id !== emp_id)
+      return res.status(403).json({ success: false, message: "Not authorized to delete" });
+
+    if (notesheet.status !== "PENDING")
+      return res.status(400).json({ success: false, message: "Only PENDING notesheets can be deleted" });
+
+    await Notesheet.findOneAndUpdate(
+      { note_id },
+      { is_deleted: true, deleted_at: new Date() }
+    );
+
+    return res.status(200).json({ success: true, message: "Notesheet deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const editNotesheet = async (req, res) => {
+  try {
+    const { note_id } = req.params;
+    const emp_id = req.user?.emp_id;
+
+    const { subject, description, category, priority, attachments } = req.body;
+
+    const notesheet = await Notesheet.findOne({ note_id, is_deleted: false });
+
+    if (!notesheet)
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
+
+    if (String(notesheet.created_by_emp_id) !== String(emp_id))
+      return res.status(403).json({ success: false, message: "Not authorized to edit" });
+
+    if (notesheet.status !== "PENDING")
+      return res.status(400).json({ success: false, message: "Only PENDING notesheets can be edited" });
+
+    const minutesElapsed = (Date.now() - new Date(notesheet.createdAt).getTime()) / 60000;
+    if (minutesElapsed > 10)
+      return res.status(400).json({ success: false, message: "Edit window of 10 minutes has expired" });
+
+    //  Notesheet update
+    const updated = await Notesheet.findOneAndUpdate(
+      { note_id },
+      { subject, description, category, priority, attachments, updatedAt: new Date() },
+      { new: true }
+    );
+
+    //  CREATED flow entry update karo — EDITED entry bilkul mat banao
+    await NotesheetFlow.findOneAndUpdate(
+      { note_id, action: "CREATED" },
+      {
+        $set: {
+          remark: description ?? null,
+          // koi aur fields jo display hoti hain flow mein
+        }
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Notesheet updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -101,16 +101,7 @@ const notesheetSchema = new mongoose.Schema(
       index: true,
     },
 
-    deadline: {
-      type: Date,
-      default: null,
-    },
-
-    openedAt: {
-      type: Date,
-      default: null,
-      index: true,
-    },
+    
     // ================= UI HELPER (OPEN / CLOSE LOGIC) =================
     lifecycle_status: {
       type: String,
@@ -118,6 +109,9 @@ const notesheetSchema = new mongoose.Schema(
       default: "OPEN",
       index: true,
     },
+   
+is_deleted: { type: Boolean, default: false },
+deleted_at: { type: Date, default: null },
   },
   {
     timestamps: true,

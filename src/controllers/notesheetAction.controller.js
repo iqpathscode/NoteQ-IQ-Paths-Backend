@@ -39,6 +39,7 @@ export const getReceivedNotesheets = async (req, res) => {
     const baseQuery = {
       status: "PENDING",
       forward_to_role_id: activeRoleId,
+      is_deleted: { $ne: true },
     };
 
     // ================= DIRECT MODE =================
@@ -378,27 +379,37 @@ export const forwardNotesheetDirect = async (req, res) => {
     const { remark, forward_to_role } = req.body;
     const user = req.user;
 
-    const notesheet = await Notesheet.findOne({ note_id: noteId }).session(session);
+    const notesheet = await Notesheet.findOne({ note_id: noteId }).session(
+      session,
+    );
     if (!notesheet) {
       await session.abortTransaction();
-      return res.status(404).json({ success: false, message: "Notesheet not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Notesheet not found" });
     }
 
     if (notesheet.mode !== 1) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: "Not a direct notesheet" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Not a direct notesheet" });
     }
 
     if (notesheet.status !== "PENDING") {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: "Already processed" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Already processed" });
     }
 
     const userRoleId = user.active_role_id || user.role_id;
 
     if (String(notesheet.forward_to_role_id) !== String(userRoleId)) {
       await session.abortTransaction();
-      return res.status(403).json({ success: false, message: "Not authorized" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     const [role, employee, toRole] = await Promise.all([
@@ -407,8 +418,18 @@ export const forwardNotesheetDirect = async (req, res) => {
       Role.findOne({ role_id: Number(forward_to_role) }),
     ]);
 
-    if (!role)   { await session.abortTransaction(); return res.status(400).json({ success: false, message: "Role not found" }); }
-    if (!toRole) { await session.abortTransaction(); return res.status(404).json({ success: false, message: "Target role not found" }); }
+    if (!role) {
+      await session.abortTransaction();
+      return res
+        .status(400)
+        .json({ success: false, message: "Role not found" });
+    }
+    if (!toRole) {
+      await session.abortTransaction();
+      return res
+        .status(404)
+        .json({ success: false, message: "Target role not found" });
+    }
 
     const nextEmployee = await Employee.findOne({
       $or: [
@@ -426,41 +447,46 @@ export const forwardNotesheetDirect = async (req, res) => {
 
     if (alreadySent) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: "Already forwarded to this role" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Already forwarded to this role" });
     }
 
     // ✅ FIX: mark current PENDING step as RESOLVED before creating new one
     await NotesheetFlow.updateMany(
       { note_id: noteId, final_status: "PENDING" },
       { $set: { final_status: "RESOLVED" } },
-      { session }
+      { session },
     );
 
     notesheet.forward_to_role_id = Number(forward_to_role);
     notesheet.current_holder_emp_id = nextEmployee?.emp_id || null;
     notesheet.forward_to_dept_id = null;
     notesheet.updated_by = user.emp_id;
-    if (!notesheet.created_by_emp_id) notesheet.created_by_emp_id = notesheet.emp_id;
+    if (!notesheet.created_by_emp_id)
+      notesheet.created_by_emp_id = notesheet.emp_id;
 
     await notesheet.save({ session });
 
     await NotesheetFlow.create(
-      [{
-        note_id: noteId,
-        from_emp_id: user.emp_id,
-        from_emp_name: employee?.emp_name ?? "Unknown User",
-        from_role_id: userRoleId,
-        from_role_name: role?.role_name ?? "Unknown Role",
-        to_emp_id: nextEmployee?.emp_id ?? null,
-        to_emp_name: nextEmployee?.emp_name ?? null,
-        to_role_id: Number(forward_to_role),
-        to_role_name: toRole?.role_name ?? "Unknown Role",
-        action: "FORWARDED",
-        remark: remark ?? null,
-        level: role?.power_level ?? 1,
-        final_status: "PENDING",
-      }],
-      { session }
+      [
+        {
+          note_id: noteId,
+          from_emp_id: user.emp_id,
+          from_emp_name: employee?.emp_name ?? "Unknown User",
+          from_role_id: userRoleId,
+          from_role_name: role?.role_name ?? "Unknown Role",
+          to_emp_id: nextEmployee?.emp_id ?? null,
+          to_emp_name: nextEmployee?.emp_name ?? null,
+          to_role_id: Number(forward_to_role),
+          to_role_name: toRole?.role_name ?? "Unknown Role",
+          action: "FORWARDED",
+          remark: remark ?? null,
+          level: role?.power_level ?? 1,
+          final_status: "PENDING",
+        },
+      ],
+      { session },
     );
 
     await session.commitTransaction();
@@ -485,7 +511,6 @@ export const forwardNotesheetDirect = async (req, res) => {
     session.endSession();
   }
 };
-
 
 export const rejectNotesheet = async (req, res) => {
   try {
@@ -680,7 +705,9 @@ export const sendQuery = async (req, res) => {
     ]);
 
     if (!notesheet) {
-      return res.status(404).json({ success: false, message: "Notesheet not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Notesheet not found" });
     }
 
     // ================= AUTHORIZATION =================
@@ -691,7 +718,9 @@ export const sendQuery = async (req, res) => {
     });
 
     if (!pendingStep) {
-      return res.status(403).json({ success: false, message: "Not authorized to send query" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized to send query" });
     }
 
     // ================= LAST FORWARDER =================
@@ -701,7 +730,10 @@ export const sendQuery = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (!lastForwardedStep) {
-      return res.status(400).json({ success: false, message: "No previous forwarder found to send query to" });
+      return res.status(400).json({
+        success: false,
+        message: "No previous forwarder found to send query to",
+      });
     }
 
     // ✅ FIX: mark the current PENDING step RESOLVED — query replaces it
@@ -742,7 +774,9 @@ export const sendQuery = async (req, res) => {
     //   remark: query,
     // }).catch((err) => console.error("Query mail error:", err));
 
-    return res.status(200).json({ success: true, message: "Query sent successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Query sent successfully" });
   } catch (error) {
     console.error("Send Query Error:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -758,7 +792,9 @@ export const replyQuery = async (req, res) => {
     const { reply } = req.body;
 
     if (!reply) {
-      return res.status(400).json({ success: false, message: "Reply is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Reply is required" });
     }
 
     const userId = req.user.emp_id;
@@ -771,7 +807,9 @@ export const replyQuery = async (req, res) => {
     ]);
 
     if (!notesheet) {
-      return res.status(404).json({ success: false, message: "Notesheet not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Notesheet not found" });
     }
 
     // ================= FIND PENDING QUERY =================
@@ -783,7 +821,10 @@ export const replyQuery = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (!currentQueryStep) {
-      return res.status(403).json({ success: false, message: "No pending query found to reply to" });
+      return res.status(403).json({
+        success: false,
+        message: "No pending query found to reply to",
+      });
     }
 
     // ✅ Mark QUERY as RESOLVED
@@ -823,7 +864,9 @@ export const replyQuery = async (req, res) => {
     //   remark: reply,
     // }).catch((err) => console.error("Reply mail error:", err));
 
-    return res.status(200).json({ success: true, message: "Reply sent successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Reply sent successfully" });
   } catch (error) {
     console.error("Reply Query Error:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -866,7 +909,7 @@ export const getProcessedNotesheets = async (req, res) => {
       note_id: { $in: noteIds },
     })
       .sort({ createdAt: -1 })
-      .lean(); // ✅ Use .lean() — avoid _doc spread issues
+      .lean();
 
     const history = notesheets.map((note) => {
       const steps = allSteps
@@ -890,17 +933,16 @@ export const getProcessedNotesheets = async (req, res) => {
             currentRoles.includes(
               actedSteps.find(
                 (a) =>
-                  a.note_id === note.note_id &&
-                  a.from_role_name === s.byRole
-              )?.from_role_id
-            ) || s.byName === req.user.emp_name
+                  a.note_id === note.note_id && a.from_role_name === s.byRole,
+              )?.from_role_id,
+            ) || s.byName === req.user.emp_name,
         );
 
       const peopleInvolved = [
         ...new Set(
           steps
             .filter((s) => s.byName !== "Unknown User")
-            .map((s) => `${s.byName} (${s.byRole})`)
+            .map((s) => `${s.byName} (${s.byRole})`),
         ),
       ];
 
@@ -984,7 +1026,7 @@ export const getApprovedNotesheetsByRole = async (req, res) => {
     const noteIds = latestFlows.map((f) => f.note_id);
 
     const notesheets = await Notesheet.find(
-      { note_id: { $in: noteIds } },
+      { note_id: { $in: noteIds }, is_deleted: { $ne: true } },
       { note_id: 1, subject: 1, lifecycle_status: 1 },
     ).lean();
 

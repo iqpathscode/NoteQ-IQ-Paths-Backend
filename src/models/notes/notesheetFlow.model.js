@@ -43,7 +43,7 @@ const notesheetFlowSchema = new mongoose.Schema(
     // ================= ACTION =================
     action: {
       type: String,
-      enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED', 'QUERY', 'QUERY_REPLY', "EXECUTION_STARTED", "CLOSED" 
+      enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED', 'QUERY', 'QUERY_REPLY', "EXECUTION_STARTED", "CLOSED"
 ],
       required: true
     },

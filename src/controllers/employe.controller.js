@@ -139,6 +139,10 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
       status: "APPROVED",
     });
 
+    const closedCount = await Notesheet.countDocuments({
+  emp_id: empId,
+  status: "CLOSED",
+});
     return res.status(200).json({
       success: true,
       message: "User-specific notesheet summary fetched successfully",
@@ -148,6 +152,7 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
         byStatus: {
           PENDING: pendingCount,
           APPROVED: approvedCount,
+          CLOSED: closedCount,
         },
       },
     });
@@ -449,8 +454,8 @@ export const switchEmployeeRole = async (req, res) => {
       secure: false, // change to true in production with HTTPS
     });
 
-    console.log("active role after switch:", employee.active_role);
-    console.log("New role token:", roleFromRoleTable.role_id);
+    // console.log("active role after switch:", employee.active_role);
+    // console.log("New role token:", roleFromRoleTable.role_id);
 
     res.json({
       success: true,
