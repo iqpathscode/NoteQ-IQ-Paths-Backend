@@ -42,6 +42,8 @@ import {
   forwardExecutionNotesheet,
   completeExecutionNotesheet,
   getNotesheetForRef,
+  deleteNotesheet,
+  editNotesheet,
 } from "../controllers/createNote.controller.js";
 
 // Roles
@@ -447,6 +449,8 @@ router.get("/departments/by-role", authenticate, getDepartmentsByRole); // ✅ a
 
 router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
 router.get("/notesheets/:noteId", authenticate, getNotesheetById); // KEEP LAST
+router.delete("/notesheet/:note_id", authenticate, deleteNotesheet);
+router.put("/notesheet/:note_id/edit", authenticate, editNotesheet);
 
 
 // ======================== NOTESHEET ACTIONS ========================
@@ -470,19 +474,19 @@ router.post("/notesheets/bulk-download", authenticate, bulkDownload);
 // ======================== NOTESHEET HEADERS ========================
 router.post(
   "/notesheet/headers",
-  authenticate, isAdmin,          // ✅ add kiya
+  authenticate, isAdmin,         
   upload.fields([{ name: "left_logo", maxCount: 1 }, { name: "right_logo", maxCount: 1 }]),
   createNotesheetHeader
 );
 router.put(
   "/notesheet/headers/:id",
-  authenticate, isAdmin,          // ✅ add kiya
+  authenticate, isAdmin,        
   upload.fields([{ name: "left_logo", maxCount: 1 }, { name: "right_logo", maxCount: 1 }]),
   updateNotesheetHeader
 );
-router.get("/notesheet/headers/active", getActiveNotesheetHeader); // ✅ public reh sakta hai (logo display)
-router.get("/notesheet/headers", authenticate, getAllNotesheetHeaders);   // ✅ add kiya
-router.delete("/notesheet/headers/:id", authenticate, isAdmin, deleteNotesheetHeader); // ✅ add kiya
+router.get("/notesheet/headers/active", getActiveNotesheetHeader); 
+router.get("/notesheet/headers", authenticate, getAllNotesheetHeaders);   
+router.delete("/notesheet/headers/:id", authenticate, isAdmin, deleteNotesheetHeader);
 
 
 // ======================== NOTIFICATIONS ========================

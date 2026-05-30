@@ -160,9 +160,25 @@ export const changePassword = async (req, res) => {
       });
     }
 
+    // ✅ Validate new password
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Minimum 8 characters required",
+      });
+    }
+
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: "Use uppercase, lowercase, number & special character",
+      });
+    }
+
     // Hash new password
     user.password = await bcrypt.hash(newPassword, 10);
-    user.isDefaultPassword = false; // ← ADD THIS
+    user.isDefaultPassword = false;
     await user.save();
 
     res.status(200).json({

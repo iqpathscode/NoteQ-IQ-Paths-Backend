@@ -4,7 +4,6 @@ import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import Role from "../models/userPowers/role.model.js";
 import Department from "../models/office/department.model.js";
 
-
 export const notesheetViewPipeline = (matchStage = null) => {
   const pipeline = [];
 
@@ -108,22 +107,32 @@ export const notesheetViewPipeline = (matchStage = null) => {
       },
     },
 
+    // $project mein ye add karo
     {
       $project: {
         _id: 0,
         id: { $toString: "$note_id" },
         note_id: 1,
         title: "$subject",
+        subject: 1, // ✅ add
         date: "$createdAt",
+        createdAt: 1, // ✅ add — edit window check ke liye zaroori
         status: 1,
         description: 1,
         attachment: 1,
+        attachments: 1, // ✅ add
+        category: 1, // ✅ add
+        priority: 1, // ✅ add
+        mode: 1, // ✅ add
+        level: 1, // ✅ add
+        emp_id: 1, // ✅ add
+        dept_id: 1, // ✅ add
+        is_deleted: 1, // ✅ add — future debugging ke liye
 
         submittedBy: 1,
         submittedByRole: 1,
         submittedTo: 1,
         signature: 1,
-
         approvalChain: 1,
       },
     },
@@ -134,8 +143,8 @@ export const notesheetViewPipeline = (matchStage = null) => {
 
 export const getAllNotesheets = async (req, res) => {
   try {
-    const notesheets = await Notesheet.aggregate(
-      notesheetViewPipeline(), // bina matchStage ke sabhi notesheets
+     const notesheets = await Notesheet.aggregate(
+      notesheetViewPipeline({ $match: { is_deleted: { $ne: true } } })
     );
 
     return res.status(200).json({
@@ -164,7 +173,7 @@ export const getNotesheetsForEmployee = async (req, res) => {
       });
     }
 
-    let query = { emp_id: empId };
+    let query = { emp_id: empId, is_deleted: { $ne: true } }; 
 
     if (status) {
       query.status = status;
@@ -253,14 +262,86 @@ export const getNotesheetsForEmployee = async (req, res) => {
   }
 };
 
+// export const getNotesheetById = async (req, res) => {
+//   try {
+//     const noteId = Number(req.params.noteId);
+
+//     const notesheet = await Notesheet.aggregate([
+//       { $match: { note_id: noteId } },
+
+//       // Submitted by lookup
+//       {
+//         $lookup: {
+//           from: "employees",
+//           localField: "emp_id",
+//           foreignField: "emp_id",
+//           as: "submittedByEmp",
+//         },
+//       },
+
+//       // Submitted to lookup (forward_to_emp_id)
+//       {
+//         $lookup: {
+//           from: "employees",
+//           localField: "forward_to_emp_id",
+//           foreignField: "emp_id",
+//           as: "submittedToEmp",
+//         },
+//       },
+
+//       {
+//         $addFields: {
+//           submittedBy: { $arrayElemAt: ["$submittedByEmp.emp_name", 0] },
+//           submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] },
+//         },
+//       },
+
+//       {
+//         $project: {
+//           _id: 0,
+//           id: { $toString: "$note_id" },
+//           note_id: 1,
+//           title: "$subject",
+//           date: "$createdAt",
+//           status: 1,
+//           description: 1,
+//           attachment: 1,
+//           submittedBy: 1,
+//           submittedTo: 1,
+//           emp_id: 1,
+//           dept_id: 1,
+//           forward_to_emp_id: 1,
+//         },
+//       },
+//     ]);
+
+//     if (!notesheet || notesheet.length === 0)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Notesheet not found" });
+
+//     return res.status(200).json({ success: true, data: notesheet[0] });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const getNotesheetById = async (req, res) => {
   try {
-    const noteId = Number(req.params.noteId);
+    const noteId = req.params.noteId; // ✅ Number() hataao — note_id string hai
 
     const notesheet = await Notesheet.aggregate([
-      { $match: { note_id: noteId } },
+      { 
+        $match: { 
+          note_id: noteId,
+          is_deleted: { $ne: true } // ✅ deleted block karo
+        } 
+      },
 
-      // Submitted by lookup
       {
         $lookup: {
           from: "employees",
@@ -270,7 +351,6 @@ export const getNotesheetById = async (req, res) => {
         },
       },
 
-      // Submitted to lookup (forward_to_emp_id)
       {
         $lookup: {
           from: "employees",
@@ -293,23 +373,26 @@ export const getNotesheetById = async (req, res) => {
           id: { $toString: "$note_id" },
           note_id: 1,
           title: "$subject",
+          subject: 1,       // ✅ edit form ke liye
+          category: 1,      // ✅ edit form ke liye
+          priority: 1,      // ✅ edit form ke liye
+          description: 1,   // ✅ edit form ke liye
+          createdAt: 1,     // ✅ 10-min check ke liye
           date: "$createdAt",
           status: 1,
-          description: 1,
           attachment: 1,
           submittedBy: 1,
           submittedTo: 1,
           emp_id: 1,
           dept_id: 1,
+          created_by_emp_id: 1, // ✅ creator check ke liye
           forward_to_emp_id: 1,
         },
       },
     ]);
 
     if (!notesheet || notesheet.length === 0)
-      return res
-        .status(404)
-        .json({ success: false, message: "Notesheet not found" });
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
 
     return res.status(200).json({ success: true, data: notesheet[0] });
   } catch (error) {
@@ -407,7 +490,9 @@ export const getApprovalFlow = async (req, res) => {
       {
         $addFields: {
           from_name: { $ifNull: ["$from_emp_name", "$fromEmployee.emp_name"] },
-          from_role_name: { $ifNull: ["$from_role_name", "$fromRole.role_name"] },
+          from_role_name: {
+            $ifNull: ["$from_role_name", "$fromRole.role_name"],
+          },
           to_name: { $ifNull: ["$to_emp_name", "$toEmployee.emp_name"] },
           to_role_name: { $ifNull: ["$to_role_name", "$toRole.role_name"] },
           from_signature: "$fromEmployee.signature",
@@ -588,7 +673,7 @@ export const getAllNotesheetsByScope = async (req, res) => {
     }
 
     // Fetch notesheets
-    const notesheets = await Notesheet.find(filter).sort({ createdAt: -1 });
+   const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } }).sort({ createdAt: -1 });
 
     // =========================
     //  FLOW PROCESSING
