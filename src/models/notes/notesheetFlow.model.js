@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const notesheetFlowSchema = new mongoose.Schema(
   {
     note_id: {
-      type: Number,
+      type: String,
       required: true
     },
 
@@ -43,7 +43,8 @@ const notesheetFlowSchema = new mongoose.Schema(
     // ================= ACTION =================
     action: {
       type: String,
-      enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED', 'QUERY', 'QUERY_REPLY'],
+      enum: ['CREATED', 'FORWARDED', 'APPROVED', 'REJECTED', 'QUERY', 'QUERY_REPLY', "EXECUTION_STARTED", "CLOSED"
+],
       required: true
     },
 
@@ -60,7 +61,7 @@ const notesheetFlowSchema = new mongoose.Schema(
 
     final_status: {
       type: String,
-      enum: ['PENDING', 'REPLIED', 'APPROVED', 'REJECTED'],
+      enum: ['PENDING', 'REPLIED', 'APPROVED', 'REJECTED', 'COMPLETED'],
       default: 'PENDING'
     }
   },

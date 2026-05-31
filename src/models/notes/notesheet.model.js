@@ -1,10 +1,9 @@
 import mongoose from "mongoose";
 
-
 const notesheetSchema = new mongoose.Schema(
   {
     note_id: {
-      type: Number,
+      type: String,
       required: true,
       unique: true,
     },
@@ -31,21 +30,35 @@ const notesheetSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // ================= WORKFLOW STATUS (UPGRADED) =================
     status: {
       type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED"],
+      enum: ["PENDING", "APPROVED", "REJECTED", "IN_EXECUTION", "CLOSED"],
       default: "PENDING",
+      index: true,
     },
 
-    forward_to_emp_id: { type: Number },
-    forward_to_role_id: { type: Number },
-    forward_to_dept_id: { type: Number },
-
-    attachment: {
-      type: String,
+    // ================= CURRENT HANDOVER =================
+    current_holder_emp_id: {
+      type: Number,
       default: null,
+      index: true,
     },
 
+    forward_to_emp_id: { type: Number, default: null },
+    forward_to_role_id: { type: Number, default: null },
+    forward_to_dept_id: { type: Number, default: null },
+
+    // ================= ATTACHMENTS =================
+    attachments: {
+      type: [String],
+      default: [],
+    },
+    
+    reference_notesheet_id: {
+  type: String,
+  default: null,
+},
     mode: {
       type: Number,
       enum: [0, 1], // 0 = chain, 1 = direct
@@ -57,15 +70,52 @@ const notesheetSchema = new mongoose.Schema(
       default: 0,
     },
 
-    // IMPORTANT FIX
-    created_by_emp_id: { type: Number, required: true },
-    created_by_role_id: { type: Number, required: false },
+    category: {
+      type: String,
+      required: true,
+    },
 
-    updated_by: { type: Number },
+    priority: {
+      type: String,
+      enum: ["low", "normal", "high", "urgent"],
+      default: "normal",
+      index: true,
+    },
+
+    // ================= AUDIT =================
+    created_by_emp_id: {
+      type: Number,
+      required: true,
+    },
+
+    created_by_role_id: {
+      type: Number,
+    },
+
+    updated_by: {
+      type: Number,
+    },
+    received_at: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+
+    
+    // ================= UI HELPER (OPEN / CLOSE LOGIC) =================
+    lifecycle_status: {
+      type: String,
+      enum: ["OPEN", "CLOSED"],
+      default: "OPEN",
+      index: true,
+    },
+   
+is_deleted: { type: Boolean, default: false },
+deleted_at: { type: Date, default: null },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Indexes

@@ -1,70 +1,141 @@
 import Notesheet from "../models/notes/notesheet.model.js";
 import Employee from "../models/user/employee.model.js";
-import NotesheetFlow from "../models/notes/notesheetFlow.model.js"; 
+import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import Role from "../models/userPowers/role.model.js";
+import Department from "../models/office/department.model.js";
 
 export const notesheetViewPipeline = (matchStage = null) => {
   const pipeline = [];
 
-  if (matchStage) {
-    pipeline.push(matchStage);
-  }
+  if (matchStage) pipeline.push(matchStage);
 
   pipeline.push(
-    // Sender lookup
     {
       $lookup: {
         from: Employee.collection.name,
         localField: "emp_id",
         foreignField: "emp_id",
-        as: "sender"
-      }
+        as: "sender",
+      },
     },
-    // Receiver lookup
+    {
+      $unwind: {
+        path: "$sender",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: "roles",
+        localField: "sender.active_role_id",
+        foreignField: "role_id",
+        as: "fromRole",
+      },
+    },
+    {
+      $unwind: {
+        path: "$fromRole",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
     {
       $lookup: {
         from: Employee.collection.name,
         localField: "forward_to",
         foreignField: "emp_id",
-        as: "receiver"
-      }
+        as: "receiver",
+      },
     },
-    //  Approval chain lookup
+    {
+      $unwind: {
+        path: "$receiver",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    // Approval chain with full enrichment
     {
       $lookup: {
         from: NotesheetFlow.collection.name,
         localField: "note_id",
         foreignField: "note_id",
-        as: "approvalChain"
-      }
+        as: "approvalChain",
+      },
     },
+
     {
       $addFields: {
-        submittedBy: { $arrayElemAt: ["$sender.emp_name", 0] },
-        forward_to_name: { $arrayElemAt: ["$receiver.emp_name", 0] },
-        submittedTo: { $arrayElemAt: ["$receiver.emp_name", 0] }
-      }
+        // ✅ Sort ONLY by createdAt — level is unreliable (repeats/resets)
+        approvalChain: {
+          $sortArray: {
+            input: {
+              $map: {
+                input: "$approvalChain",
+                as: "item",
+                in: {
+                  note_id: "$$item.note_id",
+                  level: "$$item.level",
+                  action: "$$item.action",
+                  remark: "$$item.remark",
+                  final_status: "$$item.final_status",
+                  createdAt: "$$item.createdAt",
+
+                  from_emp_id: "$$item.from_emp_id",
+                  // ✅ Use stored name fields directly from flow documents
+                  from_name: "$$item.from_emp_name",
+                  from_role_name: "$$item.from_role_name",
+
+                  to_emp_id: "$$item.to_emp_id",
+                  to_name: "$$item.to_emp_name",
+                  to_role_id: "$$item.to_role_id",
+                  to_role_name: "$$item.to_role_name",
+                },
+              },
+            },
+            // ✅ THE KEY FIX: sort by createdAt only
+            sortBy: { createdAt: 1 },
+          },
+        },
+
+        submittedBy: "$sender.emp_name",
+        submittedByRole: {
+          $ifNull: ["$sender.active_role_name", "$fromRole.role_name"],
+        },
+        forward_to_name: "$receiver.emp_name",
+        submittedTo: "$receiver.emp_name",
+        signature: "$sender.signature",
+      },
     },
+
+    // $project mein ye add karo
     {
       $project: {
         _id: 0,
         id: { $toString: "$note_id" },
         note_id: 1,
         title: "$subject",
+        subject: 1, // ✅ add
         date: "$createdAt",
+        createdAt: 1, // ✅ add — edit window check ke liye zaroori
         status: 1,
         description: 1,
-        attachment: "$attachment",
+        attachment: 1,
+        attachments: 1, // ✅ add
+        category: 1, // ✅ add
+        priority: 1, // ✅ add
+        mode: 1, // ✅ add
+        level: 1, // ✅ add
+        emp_id: 1, // ✅ add
+        dept_id: 1, // ✅ add
+        is_deleted: 1, // ✅ add — future debugging ke liye
+
         submittedBy: 1,
+        submittedByRole: 1,
         submittedTo: 1,
-        category: { $literal: null },
-        priority: { $literal: null },
-        emp_id: 1,
-        dept_id: 1,
-        forward_to: 1,
-        approvalChain: 1 //  new field
-      }
-    }
+        signature: 1,
+        approvalChain: 1,
+      },
+    },
   );
 
   return pipeline;
@@ -72,20 +143,20 @@ export const notesheetViewPipeline = (matchStage = null) => {
 
 export const getAllNotesheets = async (req, res) => {
   try {
-    const notesheets = await Notesheet.aggregate(
-      notesheetViewPipeline() // bina matchStage ke sabhi notesheets
+     const notesheets = await Notesheet.aggregate(
+      notesheetViewPipeline({ $match: { is_deleted: { $ne: true } } })
     );
 
     return res.status(200).json({
       success: true,
       message: "All notesheets fetched successfully",
-      data: notesheets
+      data: notesheets,
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -98,11 +169,11 @@ export const getNotesheetsForEmployee = async (req, res) => {
     if (!empId) {
       return res.status(400).json({
         success: false,
-        message: "empId query param is required"
+        message: "empId query param is required",
       });
     }
 
-    let query = { emp_id: empId };
+    let query = { emp_id: empId, is_deleted: { $ne: true } }; 
 
     if (status) {
       query.status = status;
@@ -116,7 +187,7 @@ export const getNotesheetsForEmployee = async (req, res) => {
     if (!notesheets.length) {
       return res.status(200).json({
         success: true,
-        data: []
+        data: [],
       });
     }
 
@@ -124,7 +195,7 @@ export const getNotesheetsForEmployee = async (req, res) => {
     const empIds = new Set();
     const roleIds = new Set();
 
-    notesheets.forEach(n => {
+    notesheets.forEach((n) => {
       empIds.add(n.emp_id);
 
       if (n.updated_by) empIds.add(n.updated_by);
@@ -133,27 +204,26 @@ export const getNotesheetsForEmployee = async (req, res) => {
 
     //  Fetch employees
     const employees = await Employee.find({
-      emp_id: { $in: [...empIds] }
+      emp_id: { $in: [...empIds] },
     }).lean();
 
     const employeeMap = {};
-    employees.forEach(e => {
+    employees.forEach((e) => {
       employeeMap[e.emp_id] = e;
     });
 
     //  Fetch roles
     const roles = await Role.find({
-      role_id: { $in: [...roleIds] }
+      role_id: { $in: [...roleIds] },
     }).lean();
 
     const roleMap = {};
-    roles.forEach(r => {
+    roles.forEach((r) => {
       roleMap[r.role_id] = r;
     });
 
     //  Format data
-    const formatted = notesheets.map(n => {
-
+    const formatted = notesheets.map((n) => {
       const employee = employeeMap[n.emp_id];
       const role = roleMap[n.forward_to_role_id];
 
@@ -166,9 +236,7 @@ export const getNotesheetsForEmployee = async (req, res) => {
       if (n.status === "APPROVED" && n.updated_by) {
         const approver = employeeMap[n.updated_by];
         const approverRole =
-          approver?.active_role?.role_name ||
-          approver?.designation ||
-          "";
+          approver?.active_role_id?.role_name || approver?.designation || "";
 
         submittedTo = `Approved by ${approver?.emp_name || "Unknown"} (${approverRole})`;
       }
@@ -176,57 +244,127 @@ export const getNotesheetsForEmployee = async (req, res) => {
       return {
         ...n,
         submittedBy: employee?.emp_name || "Unknown",
-        submittedTo
+        submittedTo,
       };
     });
 
     return res.status(200).json({
       success: true,
-      data: formatted
+      data: formatted,
     });
-
   } catch (error) {
     console.error("Error fetching notesheets:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
 
+// export const getNotesheetById = async (req, res) => {
+//   try {
+//     const noteId = Number(req.params.noteId);
+
+//     const notesheet = await Notesheet.aggregate([
+//       { $match: { note_id: noteId } },
+
+//       // Submitted by lookup
+//       {
+//         $lookup: {
+//           from: "employees",
+//           localField: "emp_id",
+//           foreignField: "emp_id",
+//           as: "submittedByEmp",
+//         },
+//       },
+
+//       // Submitted to lookup (forward_to_emp_id)
+//       {
+//         $lookup: {
+//           from: "employees",
+//           localField: "forward_to_emp_id",
+//           foreignField: "emp_id",
+//           as: "submittedToEmp",
+//         },
+//       },
+
+//       {
+//         $addFields: {
+//           submittedBy: { $arrayElemAt: ["$submittedByEmp.emp_name", 0] },
+//           submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] },
+//         },
+//       },
+
+//       {
+//         $project: {
+//           _id: 0,
+//           id: { $toString: "$note_id" },
+//           note_id: 1,
+//           title: "$subject",
+//           date: "$createdAt",
+//           status: 1,
+//           description: 1,
+//           attachment: 1,
+//           submittedBy: 1,
+//           submittedTo: 1,
+//           emp_id: 1,
+//           dept_id: 1,
+//           forward_to_emp_id: 1,
+//         },
+//       },
+//     ]);
+
+//     if (!notesheet || notesheet.length === 0)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Notesheet not found" });
+
+//     return res.status(200).json({ success: true, data: notesheet[0] });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const getNotesheetById = async (req, res) => {
   try {
-    const noteId = Number(req.params.noteId);
+    const noteId = req.params.noteId; // ✅ Number() hataao — note_id string hai
 
     const notesheet = await Notesheet.aggregate([
-      { $match: { note_id: noteId } },
+      { 
+        $match: { 
+          note_id: noteId,
+          is_deleted: { $ne: true } // ✅ deleted block karo
+        } 
+      },
 
-      // Submitted by lookup
       {
         $lookup: {
           from: "employees",
           localField: "emp_id",
           foreignField: "emp_id",
-          as: "submittedByEmp"
-        }
+          as: "submittedByEmp",
+        },
       },
 
-      // Submitted to lookup (forward_to_emp_id)
       {
         $lookup: {
           from: "employees",
           localField: "forward_to_emp_id",
           foreignField: "emp_id",
-          as: "submittedToEmp"
-        }
+          as: "submittedToEmp",
+        },
       },
 
       {
         $addFields: {
           submittedBy: { $arrayElemAt: ["$submittedByEmp.emp_name", 0] },
-          submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] }
-        }
+          submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] },
+        },
       },
 
       {
@@ -235,35 +373,43 @@ export const getNotesheetById = async (req, res) => {
           id: { $toString: "$note_id" },
           note_id: 1,
           title: "$subject",
+          subject: 1,       // ✅ edit form ke liye
+          category: 1,      // ✅ edit form ke liye
+          priority: 1,      // ✅ edit form ke liye
+          description: 1,   // ✅ edit form ke liye
+          createdAt: 1,     // ✅ 10-min check ke liye
           date: "$createdAt",
           status: 1,
-          description: 1,
           attachment: 1,
           submittedBy: 1,
           submittedTo: 1,
           emp_id: 1,
           dept_id: 1,
-          forward_to_emp_id: 1
-        }
-      }
+          created_by_emp_id: 1, // ✅ creator check ke liye
+          forward_to_emp_id: 1,
+        },
+      },
     ]);
 
     if (!notesheet || notesheet.length === 0)
       return res.status(404).json({ success: false, message: "Notesheet not found" });
 
     return res.status(200).json({ success: true, data: notesheet[0] });
-
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
 export const getApprovalFlow = async (req, res) => {
   try {
-    const noteId = Number(req.params.noteId);
+    const noteId = req.params.noteId;
 
-    // Fetch notesheet details first
     const notesheet = await Notesheet.findOne({ note_id: noteId }).lean();
+
     if (!notesheet) {
       return res.status(404).json({
         success: false,
@@ -271,11 +417,11 @@ export const getApprovalFlow = async (req, res) => {
       });
     }
 
-    // Fetch approval flow
     const flow = await NotesheetFlow.aggregate([
       { $match: { note_id: noteId } },
+      { $sort: { createdAt: 1 } },
 
-      // From employee lookup
+      // FROM EMPLOYEE
       {
         $lookup: {
           from: "employees",
@@ -284,8 +430,42 @@ export const getApprovalFlow = async (req, res) => {
           as: "fromEmployee",
         },
       },
+      { $unwind: { path: "$fromEmployee", preserveNullAndEmptyArrays: true } },
 
-      // To employee lookup
+      // DEPT
+      {
+        $lookup: {
+          from: "departments",
+          localField: "fromEmployee.dept_id",
+          foreignField: "dept_id",
+          as: "fromDept",
+        },
+      },
+      { $unwind: { path: "$fromDept", preserveNullAndEmptyArrays: true } },
+
+      // SCHOOL
+      {
+        $lookup: {
+          from: "schools",
+          localField: "fromEmployee.school_id",
+          foreignField: "school_id",
+          as: "fromSchool",
+        },
+      },
+      { $unwind: { path: "$fromSchool", preserveNullAndEmptyArrays: true } },
+
+      // FROM ROLE
+      {
+        $lookup: {
+          from: "roles",
+          localField: "from_role_id",
+          foreignField: "role_id",
+          as: "fromRole",
+        },
+      },
+      { $unwind: { path: "$fromRole", preserveNullAndEmptyArrays: true } },
+
+      // TO EMPLOYEE
       {
         $lookup: {
           from: "employees",
@@ -294,8 +474,9 @@ export const getApprovalFlow = async (req, res) => {
           as: "toEmployee",
         },
       },
+      { $unwind: { path: "$toEmployee", preserveNullAndEmptyArrays: true } },
 
-      // To role lookup
+      // TO ROLE
       {
         $lookup: {
           from: "roles",
@@ -304,69 +485,20 @@ export const getApprovalFlow = async (req, res) => {
           as: "toRole",
         },
       },
-
       { $unwind: { path: "$toRole", preserveNullAndEmptyArrays: true } },
 
-      // Lookup employees assigned to the role
-      {
-        $lookup: {
-          from: "employees",
-          let: { roleId: "$to_role_id" },
-          pipeline: [
-            { $match: { $expr: { $in: ["$$roleId", "$role_ids"] } } },
-          ],
-          as: "roleEmployee",
-        },
-      },
-
-      // Add fields for names and roles
       {
         $addFields: {
-          from_name: { $arrayElemAt: ["$fromEmployee.emp_name", 0] },
+          from_name: { $ifNull: ["$from_emp_name", "$fromEmployee.emp_name"] },
           from_role_name: {
-            $ifNull: [
-              { $arrayElemAt: ["$fromEmployee.active_role_name", 0] },
-              "$fromRole.role_name",
-            ],
+            $ifNull: ["$from_role_name", "$fromRole.role_name"],
           },
-          to_name: {
-            $cond: [
-              { $gt: [{ $size: "$toEmployee" }, 0] },
-              { $arrayElemAt: ["$toEmployee.emp_name", 0] },
-              {
-                $cond: [
-                  { $gt: [{ $size: "$roleEmployee" }, 0] },
-                  { $arrayElemAt: ["$roleEmployee.emp_name", 0] },
-                  null,
-                ],
-              },
-            ],
-          },
-          to_role_name: {
-            $switch: {
-              branches: [
-                {
-                  case: { $in: ["$action", ["QUERY", "QUERY_REPLY"]] },
-                  then: "$toRole.role_name",
-                },
-                {
-                  case: { $in: ["$action", ["CREATED", "FORWARDED"]] },
-                  then: {
-                    $cond: [
-                      { $gt: [{ $size: "$toEmployee" }, 0] },
-                      null,
-                      "$toRole.role_name",
-                    ],
-                  },
-                },
-                {
-                  case: { $in: ["$action", ["APPROVED", "REJECTED"]] },
-                  then: "$toRole.role_name",
-                },
-              ],
-              default: "$toRole.role_name",
-            },
-          },
+          to_name: { $ifNull: ["$to_emp_name", "$toEmployee.emp_name"] },
+          to_role_name: { $ifNull: ["$to_role_name", "$toRole.role_name"] },
+          from_signature: "$fromEmployee.signature",
+          from_department: "$fromDept.dept_name",
+          from_school: "$fromSchool.school_name",
+          from_designation: "$fromEmployee.designation",
         },
       },
 
@@ -382,24 +514,25 @@ export const getApprovalFlow = async (req, res) => {
           from_emp_id: 1,
           from_name: 1,
           from_role_name: 1,
+          from_signature: 1,
+          from_department: 1,
+          from_school: 1,
+          from_designation: 1,
           to_emp_id: 1,
           to_name: 1,
           to_role_id: 1,
           to_role_name: 1,
         },
       },
-
-      { $sort: { createdAt: 1 } },
     ]);
 
-    // Send both notesheet and flow
     return res.status(200).json({
       success: true,
       notesheet,
       data: flow,
     });
   } catch (error) {
-    console.error("Approval Flow Error:", error);
+    console.error("getApprovalFlow error:", error.message);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -426,23 +559,21 @@ export const getRecentNotesheets = async (req, res) => {
     //  PRIORITY: role-based
     if (roleId) {
       filter.created_by_role_id = roleId;
-    } 
+    }
     //  fallback: employee-based
     else if (empId) {
       filter.created_by_emp_id = empId;
     }
 
     const recentNotes = await Notesheet.find(filter)
-  .sort({ createdAt: -1 }) // latest first
-  .limit(5) // optional (performance ke liye)
-  .lean();
-      
+      .sort({ createdAt: -1 }) // latest first
+      .limit(5) // optional (performance ke liye)
+      .lean();
 
     return res.status(200).json({
       success: true,
       data: recentNotes || [],
     });
-
   } catch (error) {
     console.error("Recent Notes Error:", error);
     return res.status(500).json({
@@ -451,11 +582,10 @@ export const getRecentNotesheets = async (req, res) => {
     });
   }
 };
+
 export const getAllNotesheetsByScope = async (req, res) => {
   try {
-    console.log(" API HIT");
     const { empId, scope } = req.query;
-
     if (!empId) {
       return res.status(400).json({
         success: false,
@@ -463,7 +593,9 @@ export const getAllNotesheetsByScope = async (req, res) => {
       });
     }
 
-    const employee = await Employee.findOne({ emp_id: empId });
+    const empIdNum = Number(empId);
+
+    const employee = await Employee.findOne({ emp_id: empIdNum });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -475,14 +607,16 @@ export const getAllNotesheetsByScope = async (req, res) => {
       ? Number(employee.active_role_id)
       : null;
 
-    const activeRole = roleId
-      ? await Role.findOne({ role_id: roleId })
-      : null;
+    const activeRole = roleId ? await Role.findOne({ role_id: roleId }) : null;
 
     const roleDeptIds = activeRole?.dept_ids || [];
+    const viewDeptIds = activeRole?.view_dept_ids || [];
 
+    //  Dono merge — unique ids
+    const allAccessibleDeptIds = [...new Set([...roleDeptIds, ...viewDeptIds])];
+
+    // Allowed scopes
     let allowedScopes = ["MY"];
-
     if (activeRole?.view_scope === "ALL") {
       allowedScopes = ["MY", "DEPARTMENT", "ALL"];
     } else if (activeRole?.view_scope === "DEPARTMENT") {
@@ -493,62 +627,72 @@ export const getAllNotesheetsByScope = async (req, res) => {
 
     let filter = {};
 
+    // =========================
+    //  MY SCOPE
+    // =========================
     if (appliedScope === "MY") {
-      filter = roleId
-        ? { created_by_role_id: roleId }
-        : { created_by_emp_id: empId };
-    } else if (appliedScope === "DEPARTMENT") {
-      filter = roleDeptIds.length
-        ? { dept_id: { $in: roleDeptIds } }
-        : { _id: null };
-    } else {
+      const orConditions = [];
+
+      if (roleId) {
+        orConditions.push({ created_by_role_id: roleId });
+      }
+      orConditions.push({ created_by_emp_id: empIdNum });
+
+      filter = { $or: orConditions };
+    }
+
+    // =========================
+    //  DEPARTMENT
+    // =========================
+    else if (appliedScope === "DEPARTMENT") {
+      //  Frontend se specific dept_id aaya hai?
+      const requestedDept = req.query.departmentId
+        ? Number(req.query.departmentId)
+        : null;
+
+      if (allAccessibleDeptIds.length === 0) {
+        // Koi access nahi
+        filter = { _id: null };
+      } else if (
+        requestedDept &&
+        allAccessibleDeptIds.includes(requestedDept)
+      ) {
+        //  Specific dept select ki — sirf uski notesheets
+        filter = { dept_id: requestedDept };
+      } else {
+        // Koi dept select nahi — sab accessible depts
+        filter = { dept_id: { $in: allAccessibleDeptIds } };
+      }
+    }
+
+    // =========================
+    //  ALL
+    // =========================
+    else {
       filter = {};
     }
 
-    filter.status = { $ne: "APPROVED" };
+    // Fetch notesheets
+   const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } }).sort({ createdAt: -1 });
 
-    console.log(" Final Filter:", filter);
-
-    const notesheets = await Notesheet.find(filter).sort({
-      createdAt: -1,
-    });
-
-    console.log(" Notesheets:", notesheets.length);
-
-    //  STEP 1: sab note_ids nikaalo
+    // =========================
+    //  FLOW PROCESSING
+    // =========================
     const noteIds = notesheets.map((n) => n.note_id);
 
-    //  STEP 2: ek hi query me saare flows lao
     const allFlows = await NotesheetFlow.find({
       note_id: { $in: noteIds },
     }).sort({ createdAt: 1 });
 
-    console.log(" All Flows:", allFlows.length);
+    const processedNotesheets = notesheets.map((note) => {
+      let flow = allFlows.filter((f) => f.note_id === note.note_id);
 
-    //  STEP 3: mapping
-    const processedNotesheets = notesheets.map((note, index) => {
-      console.log(`\n Note ${note.note_id}`);
-
-      // note ka flow filter karo
-      let flow = allFlows.filter(
-        (f) => f.note_id === note.note_id
-      );
-
-      console.log(" Raw Flow from DB:", flow);
-
-      // reject clean
       flow = flow.filter(
         (item) =>
-          item.action !== "REJECTED" ||
-          item.final_status === "REJECTED"
+          item.action !== "REJECTED" || item.final_status === "REJECTED",
       );
 
-
-      // current step
-      const currentStep = flow.find(
-        (item) => item.final_status === "PENDING"
-      );
-
+      const currentStep = flow.find((item) => item.final_status === "PENDING");
 
       return {
         ...note.toObject(),
@@ -557,15 +701,70 @@ export const getAllNotesheetsByScope = async (req, res) => {
       };
     });
 
-
     return res.status(200).json({
       success: true,
       count: processedNotesheets.length,
       data: processedNotesheets,
     });
   } catch (error) {
-    console.error(" ERROR:", error);
+    console.error("ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
+export const getDepartmentsByRole = async (req, res) => {
+  try {
+    const { empId } = req.query;
+
+    //  Validation
+    if (!empId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required",
+      });
+    }
+
+    const employee = await Employee.findOne({ emp_id: Number(empId) });
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    const roleId = employee.active_role_id
+      ? Number(employee.active_role_id)
+      : null;
+
+    const activeRole = roleId ? await Role.findOne({ role_id: roleId }) : null;
+
+    //  dept_ids + view_dept_ids dono merge
+    const allAccessibleDeptIds = [
+      ...new Set([
+        ...(activeRole?.dept_ids || []),
+        ...(activeRole?.view_dept_ids || []),
+      ]),
+    ];
+
+    if (allAccessibleDeptIds.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const departments = await Department.find(
+      { dept_id: { $in: allAccessibleDeptIds } },
+      { dept_id: 1, dept_name: 1, _id: 0 },
+    ).sort({ dept_name: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: departments.length,
+      data: departments,
+    });
+  } catch (error) {
+    console.error("getDepartmentsByRole ERROR:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",

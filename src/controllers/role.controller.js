@@ -251,9 +251,9 @@ export const assignPowerToRole = async (req, res) => {
           : r
       );
 
-      if (emp.active_role?.role_id === role.role_id) {
-        emp.active_role.power_level = power.power_level;
-        emp.active_role.power_type = power.power_type;
+      if (emp.active_role_id?.role_id === role.role_id) {
+        emp.active_role_id.power_level = power.power_level;
+        emp.active_role_id.power_type = power.power_type;
       }
 
       await emp.save();
@@ -306,44 +306,66 @@ export const assignDeptToRole = async (req, res) => {
   }
 };
 
-// Update Departments of Role
+
 export const updateDeptOfRole = async (req, res) => {
   try {
-    const { role_id, dept_ids } = req.body;
-    if (!role_id || !dept_ids || dept_ids.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Role and Departments required" });
+    const { role_id, dept_ids, view_dept_ids } = req.body;
+
+    if (!role_id || !Array.isArray(dept_ids) || dept_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Role and at least one Department required",
+      });
     }
 
     const role = await Role.findOne({ role_id });
+
     if (!role) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Role not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Role not found",
+      });
+    }
+
+    const power = await Power.findOne({ power_id: role.power_id });
+
+    if (!power) {
+      return res.status(404).json({
+        success: false,
+        message: "Power not found",
+      });
+    }
+
+    //  Restriction logic (clean)
+    if (power.scope === "GLOBAL" || power.power_type === "HIGHER") {
+      return res.status(403).json({
+        success: false,
+        message: "GLOBAL/HIGHER roles cannot be modified",
+      });
     }
 
     role.dept_ids = dept_ids;
+    role.view_dept_ids = view_dept_ids;
     await role.save();
 
     return res.json({
       success: true,
-      message: "Departments updated for role successfully!",
+      message: "Departments updated successfully!",
     });
   } catch (error) {
     console.error("Update Dept Error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
-
 
 export const deleteRole = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Validate
+    // Validate
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -353,7 +375,7 @@ export const deleteRole = async (req, res) => {
 
     const roleId = Number(id);
 
-    // 2. Check if role exists
+    //  Check if role exists
     const role = await Role.findOne({ role_id: roleId });
 
     if (!role) {
@@ -363,7 +385,7 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    // ✅ 3. MOST IMPORTANT: check employee dependency
+    //  MOST IMPORTANT: check employee dependency
     const employeeExists = await Employee.exists({
       role_ids: roleId,
     });
@@ -376,7 +398,7 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    // 4. Delete
+    //  Delete
     await Role.deleteOne({ role_id: roleId });
 
     return res.status(200).json({

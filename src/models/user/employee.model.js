@@ -40,6 +40,9 @@ const employeeSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    signature: {
+      type: String,
+    },
     resetToken: {
       type: String,
       default: null,
@@ -49,6 +52,10 @@ const employeeSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isDefaultPassword: {
+  type: Boolean,
+  default: true,
+},
 
     // optional (if needed)
     assigned_dept_id: { type: Number },
