@@ -38,7 +38,7 @@ export const sendNotesheetMail = async ({
 
       case "REJECTED":
         title = "Notesheet Rejected";
-        message = "A notesheet has been rejected.";
+        message = "Your notesheet has been rejected.";
         break;
 
       case "QUERY":
@@ -51,10 +51,9 @@ export const sendNotesheetMail = async ({
         message = "A reply has been received for your query.";
         break;
 
-      case "FINAL":
-        title = "Notesheet Finalized";
-        message =
-          "This notesheet has reached final execution stage.";
+      case "CLOSED":
+        title = "Notesheet Closed";
+        message = "Your notesheet has been closed after execution.";
         break;
 
       default:
@@ -74,12 +73,13 @@ export const sendNotesheetMail = async ({
 
     await sendMail({
       to: employee.email,
+      name: employee.emp_name || " ",
       subject: `${title} - ${noteId}`,
       html,
     });
 
-    console.log(`✅ ${type} mail sent to ${employee.email}`);
+    console.log(` ${type} mail sent to ${employee.email}`);
   } catch (error) {
-    console.log("❌ Mail Service Error:", error.message);
+    console.log(" Mail Service Error:", error.message);
   }
 };

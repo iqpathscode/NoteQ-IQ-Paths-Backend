@@ -124,25 +124,29 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
       });
     }
 
-    // Total notesheets created by the user
-    const totalCount = await Notesheet.countDocuments({ emp_id: empId });
+    // Deleted ko exclude karke total count
+    const totalCount = await Notesheet.countDocuments({
+      emp_id: empId,
+      is_deleted: { $ne: true },
+    });
 
-    //  Pending notesheets created by the user
     const pendingCount = await Notesheet.countDocuments({
       emp_id: empId,
       status: "PENDING",
+      is_deleted: { $ne: true },
     });
 
-    //  Approved notesheets created by the user
     const approvedCount = await Notesheet.countDocuments({
       emp_id: empId,
       status: "APPROVED",
+      is_deleted: { $ne: true },
     });
 
     const closedCount = await Notesheet.countDocuments({
-  emp_id: empId,
-  status: "CLOSED",
-});
+      emp_id: empId,
+      status: "CLOSED",
+      is_deleted: { $ne: true },
+    });
     return res.status(200).json({
       success: true,
       message: "User-specific notesheet summary fetched successfully",
@@ -307,88 +311,88 @@ export const assignRoleToFaculty = async (req, res) => {
   }
 };
 
-export const updateRoleOfFaculty = async (req, res) => {
-  try {
-    const { emp_id, role_id } = req.body;
+// export const updateRoleOfFaculty = async (req, res) => {
+//   try {
+//     const { emp_id, role_id } = req.body;
 
-    if (!emp_id || !role_id) {
-      return res.status(400).json({
-        success: false,
-        message: "Employee ID and Role ID are required",
-      });
-    }
+//     if (!emp_id || !role_id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Employee ID and Role ID are required",
+//       });
+//     }
 
-    const employee = await Employee.findOne({ emp_id });
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-      });
-    }
+//     const employee = await Employee.findOne({ emp_id });
+//     if (!employee) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Employee not found",
+//       });
+//     }
 
-    const role = await Role.findOne({ role_id });
-    if (!role) {
-      return res.status(404).json({
-        success: false,
-        message: "Role not found",
-      });
-    }
+//     const role = await Role.findOne({ role_id });
+//     if (!role) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Role not found",
+//       });
+//     }
 
-    // ---------------- HOD UNIQUE CHECK ----------------
-    if (role.role_name.toUpperCase().includes("HOD")) {
-      const existingHOD = await Employee.findOne({
-        roles: {
-          $elemMatch: {
-            role_name: { $regex: /HOD/i },
-            dept_id: role.dept_id,
-          },
-        },
-      });
+//     // ---------------- HOD UNIQUE CHECK ----------------
+//     if (role.role_name.toUpperCase().includes("HOD")) {
+//       const existingHOD = await Employee.findOne({
+//         roles: {
+//           $elemMatch: {
+//             role_name: { $regex: /HOD/i },
+//             dept_id: role.dept_id,
+//           },
+//         },
+//       });
 
-      if (existingHOD && existingHOD.emp_id !== emp_id) {
-        return res.status(400).json({
-          success: false,
-          message: `This department already has an HOD assigned (${existingHOD.emp_id})`,
-        });
-      }
-    }
+//       if (existingHOD && existingHOD.emp_id !== emp_id) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `This department already has an HOD assigned (${existingHOD.emp_id})`,
+//         });
+//       }
+//     }
 
-    // ---------------- Update active_role ----------------
-    employee.active_role_id = {
-      role_id: role.role_id,
-      role_name: role.role_name,
-      dept_id: role.dept_id,
-      power_id: role.power_id,
-      power_level: role.power_level ?? 0,
-      canReceiveNotesheet: role.canReceiveNotesheet ?? false,
-    };
+//     // ---------------- Update active_role ----------------
+//     employee.active_role_id = {
+//       role_id: role.role_id,
+//       role_name: role.role_name,
+//       dept_id: role.dept_id,
+//       power_id: role.power_id,
+//       power_level: role.power_level ?? 0,
+//       canReceiveNotesheet: role.canReceiveNotesheet ?? false,
+//     };
 
-    // ---------------- Update roles array ----------------
-    const index = employee.roles.findIndex((r) => r.role_id === role.role_id);
-    if (index !== -1) {
-      // Replace existing role
-      employee.roles[index] = employee.active_role_id;
-    } else {
-      // Add new role if missing
-      employee.roles.push(employee.active_role_id);
-    }
+//     // ---------------- Update roles array ----------------
+//     const index = employee.roles.findIndex((r) => r.role_id === role.role_id);
+//     if (index !== -1) {
+//       // Replace existing role
+//       employee.roles[index] = employee.active_role_id;
+//     } else {
+//       // Add new role if missing
+//       employee.roles.push(employee.active_role_id);
+//     }
 
-    await employee.save();
+//     await employee.save();
 
-    return res.json({
-      success: true,
-      message: "Role updated successfully!",
-      data: employee,
-    });
-  } catch (error) {
-    console.error("Update Role Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
+//     return res.json({
+//       success: true,
+//       message: "Role updated successfully!",
+//       data: employee,
+//     });
+//   } catch (error) {
+//     console.error("Update Role Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
 
 export const switchEmployeeRole = async (req, res) => {
   try {
@@ -433,6 +437,7 @@ export const switchEmployeeRole = async (req, res) => {
       power_id: roleFromRoleTable.power_id,
       power_level: roleFromRoleTable.power_level,
       canReceiveNotesheet: roleFromRoleTable.canReceiveNotesheet,
+      view_scope: roleFromRoleTable.view_scope || "MY",
     };
     await employee.save();
 
@@ -685,7 +690,15 @@ export const updateProfile = async (req, res) => {
       signature = req.file.secure_url || req.file.path;
     }
 
-    if (!req.file && !existingSignature) {
+    // ← Pehle existing signature DB se fetch karo
+    const existingEmployee = !req.user.isAdmin
+      ? await Employee.findOne({ emp_id: req.user.emp_id }).select("signature")
+      : null;
+
+    const existingSignature = existingEmployee?.signature || null;
+
+    // signature sirf employee ke liye mandatory hai
+    if (!req.user.isAdmin && !req.file && !existingSignature) {
       return res.status(400).json({
         success: false,
         message: "Signature is required",

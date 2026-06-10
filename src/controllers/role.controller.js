@@ -206,105 +206,105 @@ export const getAllRoles = async (req, res) => {
 };
 
 // assignPowerToRole.js
-export const assignPowerToRole = async (req, res) => {
-  try {
-    const { role_id, power_id } = req.body;
+// export const assignPowerToRole = async (req, res) => {
+//   try {
+//     const { role_id, power_id } = req.body;
 
-    console.log("Assign Power Request:", { role_id, power_id });
+//     console.log("Assign Power Request:", { role_id, power_id });
 
-    if (!role_id || !power_id) {
-      console.log("Validation failed: Role or Power missing");
-      return res.status(400).json({ success: false, message: "Role and Power required" });
-    }
+//     if (!role_id || !power_id) {
+//       console.log("Validation failed: Role or Power missing");
+//       return res.status(400).json({ success: false, message: "Role and Power required" });
+//     }
 
-    // Fetch role
-    const role = await Role.findOne({ role_id });
-    console.log("Fetched Role:", role);
-    if (!role) {
-      console.log("Role not found in DB");
-      return res.status(404).json({ success: false, message: "Role not found" });
-    }
+//     // Fetch role
+//     const role = await Role.findOne({ role_id });
+//     console.log("Fetched Role:", role);
+//     if (!role) {
+//       console.log("Role not found in DB");
+//       return res.status(404).json({ success: false, message: "Role not found" });
+//     }
 
-    // Fetch power
-    const power = await Power.findOne({ power_id });
-    console.log("Fetched Power:", power);
-    if (!power) {
-      console.log("Power not found in DB");
-      return res.status(404).json({ success: false, message: "Power not found" });
-    }
+//     // Fetch power
+//     const power = await Power.findOne({ power_id });
+//     console.log("Fetched Power:", power);
+//     if (!power) {
+//       console.log("Power not found in DB");
+//       return res.status(404).json({ success: false, message: "Power not found" });
+//     }
 
-    // Update role
-    role.power_id = power.power_id;
-    role.power_level = power.power_level;
-    role.power_type = power.power_type;
-    await role.save();
-    console.log("Role after save:", role);
+//     // Update role
+//     role.power_id = power.power_id;
+//     role.power_level = power.power_level;
+//     role.power_type = power.power_type;
+//     await role.save();
+//     console.log("Role after save:", role);
 
-    // Update employees having this role
-    const employees = await Employee.find({ "roles.role_id": role.role_id });
-    console.log(`Employees found with role ${role.role_name}:`, employees.length);
+//     // Update employees having this role
+//     const employees = await Employee.find({ "roles.role_id": role.role_id });
+//     console.log(`Employees found with role ${role.role_name}:`, employees.length);
 
-    for (let emp of employees) {
-      emp.roles = emp.roles.map(r =>
-        r.role_id === role.role_id
-          ? { ...r.toObject(), power_level: power.power_level, power_type: power.power_type }
-          : r
-      );
+//     for (let emp of employees) {
+//       emp.roles = emp.roles.map(r =>
+//         r.role_id === role.role_id
+//           ? { ...r.toObject(), power_level: power.power_level, power_type: power.power_type }
+//           : r
+//       );
 
-      if (emp.active_role_id?.role_id === role.role_id) {
-        emp.active_role_id.power_level = power.power_level;
-        emp.active_role_id.power_type = power.power_type;
-      }
+//       if (emp.active_role_id?.role_id === role.role_id) {
+//         emp.active_role_id.power_level = power.power_level;
+//         emp.active_role_id.power_type = power.power_type;
+//       }
 
-      await emp.save();
-      console.log(`Updated employee ${emp.emp_name} (${emp.emp_id})`);
-    }
+//       await emp.save();
+//       console.log(`Updated employee ${emp.emp_name} (${emp.emp_id})`);
+//     }
 
-    return res.json({ success: true, message: "Power assigned to role successfully!", data: role });
-  } catch (error) {
-    console.error("Assign Power Error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
-  }
-};
+//     return res.json({ success: true, message: "Power assigned to role successfully!", data: role });
+//   } catch (error) {
+//     console.error("Assign Power Error:", error);
+//     return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+//   }
+// };
 // Assign Department to Role
-export const assignDeptToRole = async (req, res) => {
-  try {
-    const { role_id, dept_ids } = req.body;
-    if (!role_id || !dept_ids || dept_ids.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Role and Departments required" });
-    }
+// export const assignDeptToRole = async (req, res) => {
+//   try {
+//     const { role_id, dept_ids } = req.body;
+//     if (!role_id || !dept_ids || dept_ids.length === 0) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Role and Departments required" });
+//     }
 
-    const role = await Role.findOne({ role_id });
-    if (!role) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Role not found" });
-    }
+//     const role = await Role.findOne({ role_id });
+//     if (!role) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Role not found" });
+//     }
 
-    // Verify departments exist
-    const validDepts = await Department.find({ dept_id: { $in: dept_ids } });
-    if (validDepts.length !== dept_ids.length) {
-      return res
-        .status(400)
-        .json({ success: false, message: "One or more departments not found" });
-    }
+//     // Verify departments exist
+//     const validDepts = await Department.find({ dept_id: { $in: dept_ids } });
+//     if (validDepts.length !== dept_ids.length) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "One or more departments not found" });
+//     }
 
-    role.dept_ids = dept_ids;
-    await role.save();
+//     role.dept_ids = dept_ids;
+//     await role.save();
 
-    return res.json({
-      success: true,
-      message: "Departments assigned to role successfully!",
-    });
-  } catch (error) {
-    console.error("Assign Dept Error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
-  }
-};
+//     return res.json({
+//       success: true,
+//       message: "Departments assigned to role successfully!",
+//     });
+//   } catch (error) {
+//     console.error("Assign Dept Error:", error);
+//     return res
+//       .status(500)
+//       .json({ success: false, message: "Internal server error" });
+//   }
+// };
 
 
 export const updateDeptOfRole = async (req, res) => {
