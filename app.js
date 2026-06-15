@@ -7,6 +7,7 @@ import uploadRoutes from "./src/routes/upload.routes.js";
 import appConfigRoute from "./src/routes/appConfigRoute.js";
 import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
 import applicationRoutes from "./src/routes/application.routes.js";
+import queryRoutes from "./src/routes/query.routes.js";
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", uploadRoutes);
 app.use("/api/admin/app-config", appConfigRoute);
 app.use("/api/applications", applicationRoutes);
+app.use("/api/query", queryRoutes);
 
 app.get("/test", (req, res) => {
   res.send("API working");

@@ -11,9 +11,10 @@ const categorySchema = new mongoose.Schema(
 
 const appConfigSchema = new mongoose.Schema(
   {
-    key:        { type: String, required: true, unique: true },
-    value:      { type: mongoose.Schema.Types.Mixed, default: {} },
-    categories: { type: [categorySchema], default: [] },
+    key:            { type: String, required: true, unique: true },
+    value:          { type: mongoose.Schema.Types.Mixed, default: {} },
+    categories:     { type: [categorySchema], default: [] },
+    app_categories: { type: [categorySchema], default: [] },
   },
   { timestamps: true }
 );

@@ -29,11 +29,11 @@ export const createPower = async (req, res) => {
     let scope;
 
     if (power_level === 1) {
-      scope = "DEPARTMENT";   // HOD
+      scope = "DEPARTMENT"; // HOD
     } else if (power_level === 2) {
-      scope = "SCHOOL";       // Dean
+      scope = "SCHOOL"; // Dean
     } else {
-      scope = "GLOBAL";       // VC / Admin / PVD
+      scope = "GLOBAL"; // VC / Admin / PVD
     }
 
     // duplicate check
@@ -48,10 +48,32 @@ export const createPower = async (req, res) => {
       });
     }
 
+    // Level duplicate check
+    const levelExists = await Power.findOne({ power_level: power_level ?? 0 });
+
+    if (levelExists) {
+      return res.status(409).json({
+        success: false,
+        message: `Level ${power_level} already assigned to "${levelExists.power_name}"`,
+      });
+    }
+
+    // Name duplicate check
+    const nameExists = await Power.findOne({
+      power_name: { $regex: new RegExp(`^${power_name}$`, "i") },
+    });
+
+    if (nameExists) {
+      return res.status(409).json({
+        success: false,
+        message: "Power with this name already exists",
+      });
+    }
+
     const counter = await Counter.findOneAndUpdate(
       { name: "power_id" },
       { $inc: { seq: 1 } },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     const power = await Power.create({
@@ -68,7 +90,6 @@ export const createPower = async (req, res) => {
       message: "Power created successfully",
       data: power,
     });
-
   } catch (error) {
     console.error("Create Power Error:", error);
     return res.status(500).json({
@@ -96,7 +117,6 @@ export const getAllPowers = async (req, res) => {
     });
   }
 };
-
 
 // Update Power of Faculty for specific role
 // export const updatePowerOfFaculty = async (req, res) => {
@@ -167,8 +187,7 @@ export const deletePower = async (req, res) => {
     if (roleExists) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cannot delete power. It is assigned to one or more roles.",
+        message: "Cannot delete power. It is assigned to one or more roles.",
       });
     }
 
@@ -179,7 +198,6 @@ export const deletePower = async (req, res) => {
       success: true,
       message: "Power deleted successfully",
     });
-
   } catch (error) {
     console.error("Delete Power Error:", error);
     return res.status(500).json({

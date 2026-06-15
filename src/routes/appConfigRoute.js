@@ -1,4 +1,4 @@
-/// routes/appConfigRoute.js
+// routes/appConfigRoute.js
 import express from "express";
 import {
   getAppConfig,
@@ -7,11 +7,13 @@ import {
   addCategory,
   updateCategory,
   deleteCategory,
+  addAppCategory,
+  updateAppCategory,
+  deleteAppCategory,
 } from "../controllers/appConfigController.js";
 
 import { upload } from "../utility/cloudinary.js";
-import { authenticate, isAdmin  } from "../middlewares/auth.middleware.js";
-
+import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
 
 const handleImageUpload = (req, res, next) => {
   if (!req.file) {
@@ -36,9 +38,14 @@ router.post(
   uploadCampusImage
 );
 
-// Categories
+// ─── Notesheet Categories ─────────────────────────────────────────────────────
 router.post("/categories",       authenticate, isAdmin, addCategory);
 router.put("/categories/:id",    authenticate, isAdmin, updateCategory);
 router.delete("/categories/:id", authenticate, isAdmin, deleteCategory);
+
+// ─── Application Categories ───────────────────────────────────────────────────
+router.post("/app-categories",       authenticate, isAdmin, addAppCategory);
+router.put("/app-categories/:id",    authenticate, isAdmin, updateAppCategory);
+router.delete("/app-categories/:id", authenticate, isAdmin, deleteAppCategory);
 
 export default router;
