@@ -924,9 +924,13 @@ export const completeExecutionNotesheet = async (req, res) => {
       final_status: "COMPLETED",
     });
 
-    // ================= SEND FINAL MAIL TO ALL =================
-    await sendFinalExecutionMailToAll({
+    await sendNotesheetMail({
+      to_emp_id: notesheet.created_by_emp_id || notesheet.emp_id,
+      type: "CLOSED",
       noteId,
+      subject: notesheet.subject,
+      actionBy: employee?.emp_name || "Unknown",
+      remark,
     });
 
     return res.status(200).json({
@@ -1091,20 +1095,31 @@ export const deleteNotesheet = async (req, res) => {
     const notesheet = await Notesheet.findOne({ note_id });
 
     if (!notesheet)
-      return res.status(404).json({ success: false, message: "Notesheet not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Notesheet not found" });
 
     if (notesheet.created_by_emp_id !== emp_id)
-      return res.status(403).json({ success: false, message: "Not authorized to delete" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized to delete" });
 
     if (notesheet.status !== "PENDING")
-      return res.status(400).json({ success: false, message: "Only PENDING notesheets can be deleted" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Only PENDING notesheets can be deleted",
+        });
 
     await Notesheet.findOneAndUpdate(
       { note_id },
-      { is_deleted: true, deleted_at: new Date() }
+      { is_deleted: true, deleted_at: new Date() },
     );
 
-    return res.status(200).json({ success: true, message: "Notesheet deleted successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Notesheet deleted successfully" });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -1120,23 +1135,45 @@ export const editNotesheet = async (req, res) => {
     const notesheet = await Notesheet.findOne({ note_id, is_deleted: false });
 
     if (!notesheet)
-      return res.status(404).json({ success: false, message: "Notesheet not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Notesheet not found" });
 
     if (String(notesheet.created_by_emp_id) !== String(emp_id))
-      return res.status(403).json({ success: false, message: "Not authorized to edit" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized to edit" });
 
     if (notesheet.status !== "PENDING")
-      return res.status(400).json({ success: false, message: "Only PENDING notesheets can be edited" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Only PENDING notesheets can be edited",
+        });
 
-    const minutesElapsed = (Date.now() - new Date(notesheet.createdAt).getTime()) / 60000;
+    const minutesElapsed =
+      (Date.now() - new Date(notesheet.createdAt).getTime()) / 60000;
     if (minutesElapsed > 10)
-      return res.status(400).json({ success: false, message: "Edit window of 10 minutes has expired" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Edit window of 10 minutes has expired",
+        });
 
     //  Notesheet update
     const updated = await Notesheet.findOneAndUpdate(
       { note_id },
-      { subject, description, category, priority, attachments, updatedAt: new Date() },
-      { new: true }
+      {
+        subject,
+        description,
+        category,
+        priority,
+        attachments,
+        updatedAt: new Date(),
+      },
+      { new: true },
     );
 
     //  CREATED flow entry update karo — EDITED entry bilkul mat banao
@@ -1146,8 +1183,8 @@ export const editNotesheet = async (req, res) => {
         $set: {
           remark: description ?? null,
           // koi aur fields jo display hoti hain flow mein
-        }
-      }
+        },
+      },
     );
 
     return res.status(200).json({

@@ -262,73 +262,6 @@ export const getNotesheetsForEmployee = async (req, res) => {
   }
 };
 
-// export const getNotesheetById = async (req, res) => {
-//   try {
-//     const noteId = Number(req.params.noteId);
-
-//     const notesheet = await Notesheet.aggregate([
-//       { $match: { note_id: noteId } },
-
-//       // Submitted by lookup
-//       {
-//         $lookup: {
-//           from: "employees",
-//           localField: "emp_id",
-//           foreignField: "emp_id",
-//           as: "submittedByEmp",
-//         },
-//       },
-
-//       // Submitted to lookup (forward_to_emp_id)
-//       {
-//         $lookup: {
-//           from: "employees",
-//           localField: "forward_to_emp_id",
-//           foreignField: "emp_id",
-//           as: "submittedToEmp",
-//         },
-//       },
-
-//       {
-//         $addFields: {
-//           submittedBy: { $arrayElemAt: ["$submittedByEmp.emp_name", 0] },
-//           submittedTo: { $arrayElemAt: ["$submittedToEmp.emp_name", 0] },
-//         },
-//       },
-
-//       {
-//         $project: {
-//           _id: 0,
-//           id: { $toString: "$note_id" },
-//           note_id: 1,
-//           title: "$subject",
-//           date: "$createdAt",
-//           status: 1,
-//           description: 1,
-//           attachment: 1,
-//           submittedBy: 1,
-//           submittedTo: 1,
-//           emp_id: 1,
-//           dept_id: 1,
-//           forward_to_emp_id: 1,
-//         },
-//       },
-//     ]);
-
-//     if (!notesheet || notesheet.length === 0)
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Notesheet not found" });
-
-//     return res.status(200).json({ success: true, data: notesheet[0] });
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//       error: error.message,
-//     });
-//   }
-// };
 
 export const getNotesheetById = async (req, res) => {
   try {
@@ -546,7 +479,6 @@ export const getRecentNotesheets = async (req, res) => {
     const roleId = req.query.role_id ? Number(req.query.role_id) : null;
     const empId = req.query.emp_id ? Number(req.query.emp_id) : null;
 
-    //  dono missing → error
     if (!roleId && !empId) {
       return res.status(400).json({
         success: false,
@@ -554,20 +486,19 @@ export const getRecentNotesheets = async (req, res) => {
       });
     }
 
-    let filter = {};
+    let filter = {
+      is_deleted: { $ne: true },
+    };
 
-    //  PRIORITY: role-based
     if (roleId) {
       filter.created_by_role_id = roleId;
-    }
-    //  fallback: employee-based
-    else if (empId) {
+    } else if (empId) {
       filter.created_by_emp_id = empId;
     }
 
     const recentNotes = await Notesheet.find(filter)
-      .sort({ createdAt: -1 }) // latest first
-      .limit(5) // optional (performance ke liye)
+      .sort({ createdAt: -1 })
+      .limit(5)
       .lean();
 
     return res.status(200).json({
