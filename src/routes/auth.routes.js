@@ -111,14 +111,6 @@ import { bulkSignup } from "../controllers/execl.contorller.js";
 import { uploadExcel } from "../utility/excel.js";
 
 
-// Notifications
-import {
-  // createNotification,
-  // getNotifications,
-  // deleteNotification,
-  // markAsRead,
-} from "../controllers/notification.controller.js";
-
 // Middleware
 import { authenticate, isAdmin, verifyAdminSecret  } from "../middlewares/auth.middleware.js";
 import { loginRateLimiter, forgotPasswordRateLimiter } from "../middlewares/rateLimiter.middleware.js"
@@ -244,14 +236,6 @@ router.put(
 router.get("/notesheet/headers/active", getActiveNotesheetHeader); 
 router.get("/notesheet/headers", authenticate, getAllNotesheetHeaders);   
 router.delete("/notesheet/headers/:id", authenticate, isAdmin, deleteNotesheetHeader);
-
-
-// ======================== NOTIFICATIONS ========================
-// router.post("/notifications", authenticate, createNotification);
-// router.get("/notifications", authenticate, getNotifications);
-// router.patch("/notifications/read/:id", authenticate, markAsRead);
-// router.delete("/notifications/:id", authenticate, deleteNotification);
-
 
 // ======================== EXCEL ========================
 router.post(

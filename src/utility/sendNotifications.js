@@ -1,4 +1,3 @@
-import { Notification } from "../models/counter/notification.model.js";
 import  Role  from "../models/userPowers/role.model.js";
 
 export const sendNotification = async ({
