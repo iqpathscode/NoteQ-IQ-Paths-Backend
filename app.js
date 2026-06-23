@@ -5,7 +5,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import uploadRoutes from "./src/routes/upload.routes.js";
 import appConfigRoute from "./src/routes/appConfigRoute.js";
-import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
+// import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
 import applicationRoutes from "./src/routes/application.routes.js";
 import queryRoutes from "./src/routes/query.routes.js";
 
