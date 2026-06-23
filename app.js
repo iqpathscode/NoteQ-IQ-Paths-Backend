@@ -4,7 +4,10 @@ import authRoutes from "./src/routes/auth.routes.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import uploadRoutes from "./src/routes/upload.routes.js";
-import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
+import appConfigRoute from "./src/routes/appConfigRoute.js";
+// import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
+import applicationRoutes from "./src/routes/application.routes.js";
+import queryRoutes from "./src/routes/query.routes.js";
 
 const app = express();
 
@@ -29,7 +32,7 @@ app.use(
     credentials: true,
   }),
 );
-app.use(generalRateLimiter);
+// app.use(generalRateLimiter);
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser()); // <-- important for reading cookies
@@ -37,6 +40,9 @@ app.use(cookieParser()); // <-- important for reading cookies
 // routes
 app.use("/api/auth", authRoutes);
 app.use("/api", uploadRoutes);
+app.use("/api/admin/app-config", appConfigRoute);
+app.use("/api/applications", applicationRoutes);
+app.use("/api/query", queryRoutes);
 
 app.get("/test", (req, res) => {
   res.send("API working");

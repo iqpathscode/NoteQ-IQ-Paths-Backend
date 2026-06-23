@@ -44,7 +44,7 @@ export const notesheetMailTemplate = ({
         ">
           <tr>
             <td style="padding:10px; border:1px solid #ddd;">
-              <strong>Note ID</strong>
+              <strong>Notesheet ID</strong>
             </td>
             <td style="padding:10px; border:1px solid #ddd;">
               ${noteId}
