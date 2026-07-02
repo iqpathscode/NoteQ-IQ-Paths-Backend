@@ -24,10 +24,14 @@ const applicationSchema = new mongoose.Schema(
       required: true,
     },
 
+    category: { type: String, default: "General", trim: true },
+    priority: { type: String, enum: ["normal", "high", "urgent"], default: "normal" },
+    reference_notesheet_id: { type: String, default: null },
+
     subject: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
-    fromDate: { type: Date, required: true },
-    toDate: { type: Date, required: true },
+    fromDate: { type: Date, default: null },
+    toDate: { type: Date, default: null },
 
     // ================= WORKFLOW =================
     mode: {
@@ -40,12 +44,13 @@ const applicationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED", "QUERY_RAISED"],
+      enum: ["PENDING", "APPROVED", "REJECTED", "QUERY_RAISED", "CLOSED"],
       default: "PENDING",
       index: true,
     },
 
     // ================= CURRENT HANDOVER =================
+    current_holder_role_id: { type: Number, default: null, index: true },
     current_holder_emp_id: { type: Number, default: null, index: true },
     current_holder_emp_name: { type: String, default: "" },
 

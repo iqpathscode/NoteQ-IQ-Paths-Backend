@@ -23,13 +23,13 @@ import {
 // School & Department
 import {
   createSchool,
-  getAllSchools,
+  getSchools,
   deleteSchool,
 } from "../controllers/school.controller.js";
 
 import {
   createDepartment,
-  getAllDepartments,
+  getDepartments,
   deleteDepartment,
 } from "../controllers/department.controller.js";
 
@@ -88,6 +88,8 @@ import {
   getDepartmentsByRole,
 } from "../controllers/notesheet.controller.js";
 
+import { getCombinedDashboardData } from "../controllers/dashboard.controller.js";
+
 // Actions
 import {
   approveNotesheetDirect,
@@ -145,13 +147,13 @@ router.post("/upload", authenticate, upload.single("file"), uploadAttachment);
 
 // ======================== SCHOOL ========================
 router.post("/school", authenticate, isAdmin, createSchool);
-router.get("/school", authenticate, getAllSchools);
+router.get("/school", authenticate, getSchools);
 router.delete("/school/:id", authenticate, isAdmin, deleteSchool);
 
 
 // ======================== DEPARTMENT ========================
 router.post("/department", authenticate, isAdmin, createDepartment);
-router.get("/department", authenticate, getAllDepartments);
+router.get("/department", authenticate, getDepartments);
 router.delete("/department/:id", authenticate, isAdmin, deleteDepartment);
 
 
@@ -200,6 +202,7 @@ router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
 router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
 router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
 router.get("/departments/by-role", authenticate, getDepartmentsByRole);
+router.get("/dashboard/combined", authenticate, getCombinedDashboardData);
 
 router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
 router.get("/notesheets/:noteId", authenticate, getNotesheetById); 
