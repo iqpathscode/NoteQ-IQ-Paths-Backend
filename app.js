@@ -43,6 +43,7 @@ app.use("/api", uploadRoutes);
 app.use("/api/admin/app-config", appConfigRoute);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/query", queryRoutes);
+app.set("trust proxy", 1);
 
 app.get("/test", (req, res) => {
   res.send("API working");

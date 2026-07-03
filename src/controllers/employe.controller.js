@@ -394,16 +394,89 @@ export const assignRoleToFaculty = async (req, res) => {
 //   }
 // };
 
+// export const switchEmployeeRole = async (req, res) => {
+//   try {
+//     const { role_id } = req.body;
+//     const empId = req.user.emp_id;
+
+//     if (!role_id) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "role_id is required" });
+//     }
+
+//     const employee = await Employee.findOne({ emp_id: empId });
+//     if (!employee) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Employee not found" });
+//     }
+
+//     // Check role against role_ids array
+//     const hasRole = employee.role_ids.includes(Number(role_id));
+//     if (!hasRole) {
+//       return res
+//         .status(403)
+//         .json({ success: false, message: "You are not assigned this role" });
+//     }
+
+//     //  Fetch role details from Role table
+//     const roleFromRoleTable = await Role.findOne({ role_id }).lean();
+//     if (!roleFromRoleTable) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Role not found in Role table" });
+//     }
+
+//     //  Update active_role_id and optional full role object
+//     employee.active_role_id = Number(role_id);
+//     employee.active_role = {
+//       role_id: roleFromRoleTable.role_id,
+//       role_name: roleFromRoleTable.role_name,
+//       dept_id: employee.dept_id,
+//       power_id: roleFromRoleTable.power_id,
+//       power_level: roleFromRoleTable.power_level,
+//       canReceiveNotesheet: roleFromRoleTable.canReceiveNotesheet,
+//       view_scope: roleFromRoleTable.view_scope || "MY",
+//     };
+//     await employee.save();
+
+//     //  Generate new token with updated role
+//     const token = jwt.sign(
+//       {
+//         emp_id: employee.emp_id,
+//         role_id: roleFromRoleTable.role_id,
+//         dept_id: employee.dept_id,
+//         isAdmin: employee.isAdmin || false,
+//       },
+//       env.JWT_SECRET,
+//       { expiresIn: env.JWT_EXPIRES_IN },
+//     );
+
+//     res.cookie("token", token, {
+//       httpOnly: true,
+//       sameSite: "strict",
+//       secure: false, // change to true in production with HTTPS
+//     });
+
+//     // console.log("active role after switch:", employee.active_role);
+//     // console.log("New role token:", roleFromRoleTable.role_id);
+
+//     res.json({
+//       success: true,
+//       message: "Role switched successfully",
+//       active_role: employee.active_role,
+//     });
+//   } catch (error) {
+//     console.error("Error switching role:", error);
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// };
+
 export const switchEmployeeRole = async (req, res) => {
   try {
     const { role_id } = req.body;
     const empId = req.user.emp_id;
-
-    if (!role_id) {
-      return res
-        .status(400)
-        .json({ success: false, message: "role_id is required" });
-    }
 
     const employee = await Employee.findOne({ emp_id: empId });
     if (!employee) {
@@ -411,6 +484,42 @@ export const switchEmployeeRole = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Employee not found" });
     }
+
+    // =========================
+    // PERSONAL MODE (role_id is null)
+    // =========================
+    if (role_id === null || role_id === undefined) {
+      employee.active_role_id = null;
+      employee.active_role = null;
+      await employee.save();
+
+      const token = jwt.sign(
+        {
+          emp_id: employee.emp_id,
+          role_id: null,
+          dept_id: employee.dept_id,
+          isAdmin: employee.isAdmin || false,
+        },
+        env.JWT_SECRET,
+        { expiresIn: env.JWT_EXPIRES_IN },
+      );
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: false, // change to true in production with HTTPS
+      });
+
+      return res.json({
+        success: true,
+        message: "Switched to personal profile",
+        active_role: null,
+      });
+    }
+
+    // =========================
+    // ROLE MODE (existing logic)
+    // =========================
 
     // Check role against role_ids array
     const hasRole = employee.role_ids.includes(Number(role_id));
@@ -458,9 +567,6 @@ export const switchEmployeeRole = async (req, res) => {
       sameSite: "strict",
       secure: false, // change to true in production with HTTPS
     });
-
-    // console.log("active role after switch:", employee.active_role);
-    // console.log("New role token:", roleFromRoleTable.role_id);
 
     res.json({
       success: true,

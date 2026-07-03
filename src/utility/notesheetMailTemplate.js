@@ -5,6 +5,7 @@ export const notesheetMailTemplate = ({
   noteId,
   subject,
   actionBy,
+  actionByRole,
   remark,
 }) => {
   return `
@@ -64,13 +65,13 @@ export const notesheetMailTemplate = ({
             actionBy
               ? `
             <tr>
-              <td style="padding:10px; border:1px solid #ddd;">
-                <strong>Action By</strong>
-              </td>
-              <td style="padding:10px; border:1px solid #ddd;">
-                ${actionBy}
-              </td>
-            </tr>
+  <td style="padding:10px; border:1px solid #ddd;">
+    <strong>Action By</strong>
+  </td>
+  <td style="padding:10px; border:1px solid #ddd;">
+    ${actionBy}${actionByRole ? ` (${actionByRole})` : ""}
+  </td>
+</tr>
           `
               : ""
           }

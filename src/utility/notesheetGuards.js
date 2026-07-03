@@ -43,7 +43,7 @@ export const checkQueryBlock = async (noteId, session = null) => {
  * @returns {{ allowed: boolean, message?: string, lastForwardedStep?: object }}
  */
 export const canRaiseQuery = async (noteId) => {
-  // Koi pehle se open query hai?
+  // Check if there's already an open query
   const openQuery = await NotesheetFlow.findOne({
     note_id:      noteId,
     action:       'QUERY',
@@ -53,11 +53,11 @@ export const canRaiseQuery = async (noteId) => {
   if (openQuery) {
     return {
       allowed: false,
-      message: 'Ek query pehle se pending hai. Reply aane ke baad hi naya query bhej sakte hain.',
+      message: 'A query is already pending. You can send a new query only after the reply is received.',
     };
   }
 
-  // Koi FORWARDED step hai?
+  // Check if there's any FORWARDED step
   const lastForwardedStep = await NotesheetFlow.findOne({
     note_id: noteId,
     action:  'FORWARDED',
@@ -66,7 +66,7 @@ export const canRaiseQuery = async (noteId) => {
   if (!lastForwardedStep) {
     return {
       allowed: false,
-      message: 'Yeh notesheet abhi sirf create hui hai. Query raise karne ke liye pehle forward honi chahiye.',
+      message: 'This notesheet has only just been created. It must be forwarded before a query can be raised.',
     };
   }
 

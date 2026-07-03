@@ -54,6 +54,7 @@ import {
   // assignDeptToRole,
   updateDeptOfRole,
   deleteRole,
+  getRoleAssignedEmployee
 } from "../controllers/role.controller.js";
 
 // Power
@@ -167,6 +168,7 @@ router.post("/role", authenticate, isAdmin, createRole);
 router.get("/role", authenticate, getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
 router.delete("/role/:id", authenticate, isAdmin, deleteRole);
+router.get("/role/:role_id/assigned-employee", authenticate, getRoleAssignedEmployee);
 
 // router.post("/assign-power", authenticate, isAdmin, assignPowerToRole);
 router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);

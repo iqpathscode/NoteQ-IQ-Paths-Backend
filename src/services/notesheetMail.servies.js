@@ -8,7 +8,8 @@ export const sendNotesheetMail = async ({
   noteId,
   subject,
   actionBy,
-  remark,
+  actionByRole,
+  remark, 
 }) => {
   try {
     const employee = await Employee.findOne({
@@ -68,6 +69,7 @@ export const sendNotesheetMail = async ({
       noteId,
       subject,
       actionBy,
+      actionByRole, 
       remark,
     });
 
