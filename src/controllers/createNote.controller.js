@@ -1272,9 +1272,11 @@ export const forwardChainOnly = async (req, res) => {
     await NotesheetFlow.updateMany(
       { note_id, final_status: "PENDING" },
       { $set: { final_status: "RESOLVED" } },
+      { session },
       { session }
     );
 
+    // Notesheet update karo
     // Notesheet update karo
     notesheet.forward_to_role_id = nextRole.role_id;
     notesheet.forward_to_emp_id = nextEmployee?.emp_id ?? null;
@@ -1284,6 +1286,7 @@ export const forwardChainOnly = async (req, res) => {
     notesheet.updated_by = user.emp_id;
     await notesheet.save({ session });
 
+    // Naya flow entry create karo
     // Naya flow entry create karo
     await NotesheetFlow.create(
       [
@@ -1321,7 +1324,6 @@ export const forwardChainOnly = async (req, res) => {
     session.endSession();
   }
 };
-
 // ============================================================
 // EXECUTION STARTED
 // ============================================================

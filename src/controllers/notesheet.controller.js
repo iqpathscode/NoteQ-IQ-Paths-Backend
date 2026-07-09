@@ -165,6 +165,8 @@ export const getNotesheetsForEmployee = async (req, res) => {
   try {
     const empId = Number(req.query.empId);
     const status = req.query.status;
+    const roleId = req.query.role_id ? Number(req.query.role_id) : null;
+    const viewType = req.query.view_type; // "role" | "employee"
 
     if (!empId) {
       return res.status(400).json({
@@ -173,7 +175,23 @@ export const getNotesheetsForEmployee = async (req, res) => {
       });
     }
 
-    let query = { emp_id: empId, is_deleted: { $ne: true } }; 
+    // ✅ FIXED: ab summary endpoint (getEmployeeNotesheetSummary) jaisa hi
+    // filtering logic use ho raha hai — created_by_emp_id + created_by_role_id.
+    // Pehle sirf `emp_id: empId` pe filter tha, jo summary ke "roleWise"
+    // grouping se match hi nahi karta tha (isliye stat card count aur is
+    // list ka data mismatch ho raha tha).
+    let query = {
+      created_by_emp_id: empId,
+      is_deleted: { $ne: true },
+    };
+
+    if (viewType === "role" && roleId) {
+      // Role-wise view: sirf usi role se create/act ki hui notesheets
+      query.created_by_role_id = roleId;
+    } else {
+      // Own profile view: created_by_role_id null hona chahiye
+      query.created_by_role_id = null;
+    }
 
     if (status) {
       query.status = status;
@@ -478,6 +496,7 @@ export const getRecentNotesheets = async (req, res) => {
   try {
     const roleId = req.query.role_id ? Number(req.query.role_id) : null;
     const empId = req.query.emp_id ? Number(req.query.emp_id) : null;
+    const viewType = req.query.view_type; // "employee" | "role"
 
     if (!roleId && !empId) {
       return res.status(400).json({
@@ -486,14 +505,36 @@ export const getRecentNotesheets = async (req, res) => {
       });
     }
 
+    if (!viewType || !["employee", "role"].includes(viewType)) {
+      return res.status(400).json({
+        success: false,
+        message: "view_type is required and must be either 'employee' or 'role'",
+      });
+    }
+
     let filter = {
       is_deleted: { $ne: true },
     };
 
-    if (roleId) {
-      filter.created_by_role_id = roleId;
-    } else if (empId) {
+    if (viewType === "employee") {
+      if (!empId) {
+        return res.status(400).json({
+          success: false,
+          message: "emp_id is required for employee view_type",
+        });
+      }
+      // ✅ Personal profile = sirf woh notes jo bina kisi role ke bane the
       filter.created_by_emp_id = empId;
+      filter.created_by_role_id = null;
+    } else if (viewType === "role") {
+      if (!roleId) {
+        return res.status(400).json({
+          success: false,
+          message: "role_id is required for role view_type",
+        });
+      }
+      // ✅ Role context = us specific role se bane notes
+      filter.created_by_role_id = roleId;
     }
 
     const recentNotes = await Notesheet.find(filter)
@@ -543,10 +584,8 @@ export const getAllNotesheetsByScope = async (req, res) => {
     const roleDeptIds = activeRole?.dept_ids || [];
     const viewDeptIds = activeRole?.view_dept_ids || [];
 
-    //  Dono merge — unique ids
     const allAccessibleDeptIds = [...new Set([...roleDeptIds, ...viewDeptIds])];
 
-    // Allowed scopes
     let allowedScopes = ["MY"];
     if (activeRole?.view_scope === "ALL") {
       allowedScopes = ["MY", "DEPARTMENT", "ALL"];
@@ -559,56 +598,47 @@ export const getAllNotesheetsByScope = async (req, res) => {
     let filter = {};
 
     // =========================
-    //  MY SCOPE
+    // MY SCOPE
     // =========================
     if (appliedScope === "MY") {
-      const orConditions = [];
-
       if (roleId) {
-        orConditions.push({ created_by_role_id: roleId });
+        // Active role selected hai → sirf usi role se banayi notesheets
+        filter = { created_by_role_id: roleId };
+      } else {
+        // Koi active role nahi → sirf personal (bina role ke) notesheets
+        filter = { created_by_emp_id: empIdNum, created_by_role_id: null };
       }
-      orConditions.push({ created_by_emp_id: empIdNum });
-
-      filter = { $or: orConditions };
     }
 
     // =========================
-    //  DEPARTMENT
+    // DEPARTMENT
     // =========================
     else if (appliedScope === "DEPARTMENT") {
-      //  Frontend se specific dept_id aaya hai?
       const requestedDept = req.query.departmentId
         ? Number(req.query.departmentId)
         : null;
 
       if (allAccessibleDeptIds.length === 0) {
-        // Koi access nahi
         filter = { _id: null };
       } else if (
         requestedDept &&
         allAccessibleDeptIds.includes(requestedDept)
       ) {
-        //  Specific dept select ki — sirf uski notesheets
         filter = { dept_id: requestedDept };
       } else {
-        // Koi dept select nahi — sab accessible depts
         filter = { dept_id: { $in: allAccessibleDeptIds } };
       }
     }
 
     // =========================
-    //  ALL
+    // ALL
     // =========================
     else {
       filter = {};
     }
 
-    // Fetch notesheets
-   const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } }).sort({ createdAt: -1 });
+    const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } }).sort({ createdAt: -1 });
 
-    // =========================
-    //  FLOW PROCESSING
-    // =========================
     const noteIds = notesheets.map((n) => n.note_id);
 
     const allFlows = await NotesheetFlow.find({

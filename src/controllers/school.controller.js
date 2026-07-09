@@ -2,6 +2,29 @@ import School from "../models/office/school.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 import Department from "../models/office/department.model.js";
 
+const schoolListPipeline = (matchStage = null) => {
+  const pipeline = [];
+
+  if (matchStage) {
+    pipeline.push(matchStage);
+  }
+
+  pipeline.push(
+    {
+      $project: {
+        _id: 0,
+        school_id: 1,
+        school_name: 1,
+      },
+    },
+    {
+      $sort: { school_name: 1 },
+    }
+  );
+
+  return pipeline;
+};
+
 export const createSchool = async (req, res) => {
   try {
     let { school_name } = req.body;
@@ -57,20 +80,29 @@ export const createSchool = async (req, res) => {
   }
 };
 
-export const getAllSchools = async (req, res) => {
+export const getSchools = async (req, res) => {
   try {
-    const schools = await School.find().sort({ school_name: 1 });
+    const search = req.query.search?.trim();
+    const matchStage = search
+      ? {
+          $match: {
+            school_name: { $regex: search, $options: "i" },
+          },
+        }
+      : null;
+
+    const schools = await School.aggregate(schoolListPipeline(matchStage));
 
     return res.status(200).json({
       success: true,
-      count: schools.length,
+      message: "Schools fetched successfully",
       data: schools,
     });
   } catch (error) {
-    console.error("Get Schools Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Error fetching schools",
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };

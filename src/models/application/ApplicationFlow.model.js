@@ -25,7 +25,16 @@ const applicationFlowSchema = new mongoose.Schema(
     // ================= ACTION =================
     action: {
       type: String,
-      enum: ["CREATED", "APPROVED", "REJECTED", "QUERY", "QUERY_REPLY"],
+       enum: [
+        'CREATED',
+        'FORWARDED',
+        'APPROVED',
+        'REJECTED',
+        'QUERY',
+        'QUERY_REPLY',
+        'EXECUTION_STARTED',
+        'CLOSED'
+      ],
       required: true,
     },
 
@@ -40,10 +49,18 @@ const applicationFlowSchema = new mongoose.Schema(
     },
 
     final_status: {
-      type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED", "QUERY_RAISED", "QUERY_REPLIED"],
-      default: "PENDING",
-    },
+  type: String,
+  enum: [
+    'PENDING',
+    'QUERY_RAISED',
+    'QUERY_REPLIED', // 👈 add kiya
+    'RESOLVED',
+    'APPROVED',
+    'REJECTED',
+    'COMPLETED'
+  ],
+  default: "PENDING",
+},
   },
   { timestamps: true }
 );

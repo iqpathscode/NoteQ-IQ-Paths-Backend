@@ -23,13 +23,13 @@ import {
 // School & Department
 import {
   createSchool,
-  getAllSchools,
+  getSchools,
   deleteSchool,
 } from "../controllers/school.controller.js";
 
 import {
   createDepartment,
-  getAllDepartments,
+  getDepartments,
   deleteDepartment,
 } from "../controllers/department.controller.js";
 
@@ -89,6 +89,8 @@ import {
   getDepartmentsByRole,
 } from "../controllers/notesheet.controller.js";
 
+import { getCombinedDashboardData } from "../controllers/dashboard.controller.js";
+
 // Actions
 import {
   approveNotesheetDirect,
@@ -131,7 +133,6 @@ router.post("/admin", verifyAdminSecret, createAdmin);
 
 // ======================== AUTH ========================
 router.post("/login", loginRateLimiter, login);
-// router.post("/signup", signup);
 router.get("/me", authenticate, getMe);
 router.put("/change-password", authenticate, changePassword);
 router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
@@ -146,20 +147,19 @@ router.post("/upload", authenticate, upload.single("file"), uploadAttachment);
 
 // ======================== SCHOOL ========================
 router.post("/school", authenticate, isAdmin, createSchool);
-router.get("/school", authenticate, getAllSchools);
+router.get("/school", authenticate, getSchools);
 router.delete("/school/:id", authenticate, isAdmin, deleteSchool);
 
 
 // ======================== DEPARTMENT ========================
 router.post("/department", authenticate, isAdmin, createDepartment);
-router.get("/department", authenticate, getAllDepartments);
+router.get("/department", authenticate, getDepartments);
 router.delete("/department/:id", authenticate, isAdmin, deleteDepartment);
 
 
 // ======================== POWER ========================
 router.post("/power", authenticate, isAdmin, createPower);
 router.get("/power", authenticate, getAllPowers);
-// router.put("/power", authenticate, isAdmin, updatePowerOfFaculty);
 router.delete("/power/:id", authenticate, isAdmin, deletePower);
 
 
@@ -169,13 +169,10 @@ router.get("/role", authenticate, getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
 router.delete("/role/:id", authenticate, isAdmin, deleteRole);
 router.get("/role/:role_id/assigned-employee", authenticate, getRoleAssignedEmployee);
-
-// router.post("/assign-power", authenticate, isAdmin, assignPowerToRole);
 router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);
-// router.post("/assign-dept-role", authenticate, isAdmin, assignDeptToRole);
 
-// router.put("/update-role", authenticate, isAdmin, updateRoleOfFaculty);
-// router.put("/update-power", authenticate, isAdmin, updatePowerOfFaculty);
+
+
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
 router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.put("/transfer-role", authenticate, transferRole);
@@ -202,6 +199,7 @@ router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
 router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
 router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
 router.get("/departments/by-role", authenticate, getDepartmentsByRole);
+router.get("/dashboard/combined", authenticate, getCombinedDashboardData);
 
 router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
 router.get("/notesheets/:noteId", authenticate, getNotesheetById); 

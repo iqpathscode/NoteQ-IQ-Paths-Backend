@@ -14,6 +14,7 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js"
+    
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
