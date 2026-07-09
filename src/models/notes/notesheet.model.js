@@ -54,11 +54,11 @@ const notesheetSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    
+
     reference_notesheet_id: {
-  type: String,
-  default: null,
-},
+      type: String,
+      default: null,
+    },
     mode: {
       type: Number,
       enum: [0, 1], // 0 = chain, 1 = direct
@@ -77,8 +77,8 @@ const notesheetSchema = new mongoose.Schema(
 
     priority: {
       type: String,
-      enum: ["low", "normal", "high", "urgent"],
-      default: "normal",
+      enum: ["low", "medium", "high"],
+      default: "medium",
       index: true,
     },
 
@@ -101,7 +101,6 @@ const notesheetSchema = new mongoose.Schema(
       index: true,
     },
 
-    
     // ================= UI HELPER (OPEN / CLOSE LOGIC) =================
     lifecycle_status: {
       type: String,
@@ -109,9 +108,9 @@ const notesheetSchema = new mongoose.Schema(
       default: "OPEN",
       index: true,
     },
-   
-is_deleted: { type: Boolean, default: false },
-deleted_at: { type: Date, default: null },
+
+    is_deleted: { type: Boolean, default: false },
+    deleted_at: { type: Date, default: null },
   },
   {
     timestamps: true,

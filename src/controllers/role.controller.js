@@ -1,7 +1,7 @@
 // controllers/role.controller.js
 import Role from "../models/userPowers/role.model.js";
 import { Counter } from "../models/counter/counter.model.js";
-import Department from "../models/office/department.model.js";
+import  Department  from "../models/office/department.model.js";
 import Power from "../models/userPowers/power.model.js";
 import Employee from "../models/user/employee.model.js";
 
@@ -197,15 +197,21 @@ export const createRole = async (req, res) => {
       canReceiveNotesheet,
       view_scope,
       view_dept_ids,
+      app_view_scope,
+      app_view_dept_ids,
     } = req.body;
 
     role_name = role_name?.trim();
     power_id = Number(power_id);
     view_scope = view_scope || "OWN";
+    app_view_scope = app_view_scope || "OWN";
 
     let deptIdsNumber = [];
     view_dept_ids = Array.isArray(view_dept_ids)
       ? view_dept_ids.map(Number)
+      : [];
+    app_view_dept_ids = Array.isArray(app_view_dept_ids)
+      ? app_view_dept_ids.map(Number)
       : [];
 
     // ===============================
@@ -287,6 +293,37 @@ export const createRole = async (req, res) => {
       if (view_scope === "OWN") {
         view_dept_ids = [];
       }
+
+      if (!['OWN', 'DEPARTMENT', 'ALL'].includes(app_view_scope)) {
+        return res.status(400).json({
+          success: false,
+          message: "Application view access must be OWN, DEPARTMENT, or ALL",
+        });
+      }
+
+      if (app_view_scope === "DEPARTMENT") {
+        if (!app_view_dept_ids.length) {
+          return res.status(400).json({
+            success: false,
+            message: "Select at least one department for application view access",
+          });
+        }
+
+        const appViewDepts = await Department.find({
+          dept_id: { $in: app_view_dept_ids },
+        });
+
+        if (appViewDepts.length !== app_view_dept_ids.length) {
+          return res.status(404).json({
+            success: false,
+            message: "Invalid application view departments selected",
+          });
+        }
+      }
+
+      if (app_view_scope === "OWN") {
+        app_view_dept_ids = [];
+      }
     } else if (power.power_type === "HIGHER") {
       deptIdsNumber = [];
 
@@ -298,6 +335,8 @@ export const createRole = async (req, res) => {
       }
 
       view_dept_ids = [];
+      app_view_scope = ["OWN", "ALL"].includes(app_view_scope) ? app_view_scope : "OWN";
+      app_view_dept_ids = [];
     }
 
     // ===============================
@@ -345,6 +384,17 @@ export const createRole = async (req, res) => {
       }
     }
 
+    if (app_view_scope === "DEPARTMENT" && app_view_dept_ids.length > 0) {
+      const isSubset = app_view_dept_ids.every((id) => deptIdsNumber.includes(id));
+
+      if (!isSubset) {
+        return res.status(400).json({
+          success: false,
+          message: "Application view departments must be a subset of assigned departments",
+        });
+      }
+    }
+
     // ===============================
     //  GENERATE ROLE ID
     // ===============================
@@ -365,6 +415,8 @@ export const createRole = async (req, res) => {
       canReceiveNotesheet: !!canReceiveNotesheet,
       view_scope,
       view_dept_ids,
+      app_view_scope,
+      app_view_dept_ids,
     });
 
     return res.status(201).json({
@@ -570,11 +622,65 @@ export const updateDeptOfRole = async (req, res) => {
   }
 };
 
+// export const deleteRole = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // Validate
+//     if (!id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Role ID is required",
+//       });
+//     }
+
+//     const roleId = Number(id);
+
+//     //  Check if role exists
+//     const role = await Role.findOne({ role_id: roleId });
+
+//     if (!role) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Role not found",
+//       });
+//     }
+
+//     //  MOST IMPORTANT: check employee dependency
+//     const employeeExists = await Employee.exists({
+//       role_ids: roleId,
+//     });
+
+//     if (employeeExists) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "Cannot delete role. It is assigned to one or more employees.",
+//       });
+//     }
+
+//     //  Delete
+//     await Role.deleteOne({ role_id: roleId });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Role deleted successfully",
+//     });
+
+//   } catch (error) {
+//     console.error("Delete Role Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Error deleting role",
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const deleteRole = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -584,9 +690,8 @@ export const deleteRole = async (req, res) => {
 
     const roleId = Number(id);
 
-    //  Check if role exists
+    // Check if role exists
     const role = await Role.findOne({ role_id: roleId });
-
     if (!role) {
       return res.status(404).json({
         success: false,
@@ -594,25 +699,35 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    //  MOST IMPORTANT: check employee dependency
-    const employeeExists = await Employee.exists({
-      role_ids: roleId,
-    });
+    // Check if assigned to any employee
+    const assignedEmployee = await Employee.findOne({ role_ids: roleId });
 
-    if (employeeExists) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Cannot delete role. It is assigned to one or more employees.",
-      });
+    if (assignedEmployee) {
+      // role_ids[] se remove karo
+      assignedEmployee.role_ids = assignedEmployee.role_ids.filter(
+        (id) => id !== roleId
+      );
+
+      // agar active_role_id yahi tha toh update karo
+      if (assignedEmployee.active_role_id === roleId) {
+        assignedEmployee.active_role_id = assignedEmployee.role_ids[0] ?? null;
+      }
+
+      await assignedEmployee.save();
     }
 
-    //  Delete
+    // Role delete karo
     await Role.deleteOne({ role_id: roleId });
 
     return res.status(200).json({
       success: true,
       message: "Role deleted successfully",
+      unassignedFrom: assignedEmployee
+        ? {
+            emp_id: assignedEmployee.emp_id,
+            emp_name: assignedEmployee.emp_name,
+          }
+        : null,
     });
 
   } catch (error) {
@@ -622,5 +737,25 @@ export const deleteRole = async (req, res) => {
       message: "Error deleting role",
       error: error.message,
     });
+  }
+};
+
+// getAssignedEmployee.js
+export const getRoleAssignedEmployee = async (req, res) => {
+  try {
+    const roleIdNum = Number(req.params.role_id);
+
+    const employee = await Employee.findOne(
+      { role_ids: roleIdNum },
+      { emp_id: 1, emp_name: 1, active_role_id: 1 } // sirf zaruri fields
+    );
+
+    return res.status(200).json({
+      success: true,
+      employee: employee || null,
+    });
+  } catch (error) {
+    console.error("getRoleAssignedEmployee error:", error);
+    return res.status(500).json({ success: false, message: "Internal server error." });
   }
 };

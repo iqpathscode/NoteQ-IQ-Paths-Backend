@@ -20,14 +20,20 @@ const applicationSchema = new mongoose.Schema(
     // ================= APPLICATION DETAILS =================
     applicationType: {
       type: String,
-      enum: ["Leave Request", "On Duty", "Reimbursement", "Permission", "Other"],
       required: true,
+      trim: true,
+    },
+
+    priority: {
+      type: String,
+      enum: ["normal", "high", "urgent"],
+      default: "normal",
     },
 
     subject: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
-    fromDate: { type: Date, required: true },
-    toDate: { type: Date, required: true },
+    fromDate: { type: Date, default: null },
+    toDate: { type: Date, default: null },
 
     // ================= WORKFLOW =================
     mode: {
@@ -40,12 +46,19 @@ const applicationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED", "QUERY_RAISED"],
+      enum: ["PENDING", "APPROVED", "REJECTED", "IN_EXECUTION", "CLOSED"],
       default: "PENDING",
       index: true,
     },
 
+    lifecycle_status: {
+      type: String,
+      enum: ["OPEN", "CLOSED"],
+      default: "OPEN",
+      index: true,
+    },
     // ================= CURRENT HANDOVER =================
+    current_holder_role_id: { type: Number, default: null, index: true },
     current_holder_emp_id: { type: Number, default: null, index: true },
     current_holder_emp_name: { type: String, default: "" },
 
@@ -75,7 +88,7 @@ const applicationSchema = new mongoose.Schema(
     is_deleted: { type: Boolean, default: false },
     deleted_at: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 applicationSchema.index({ dept_id: 1, status: 1 });

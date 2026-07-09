@@ -4,6 +4,44 @@ import School from "../models/office/school.model.js";
 import Employee from "../models/user/employee.model.js";
 import Role from "../models/userPowers/role.model.js";
 
+const departmentListPipeline = (matchStage = null) => {
+  const pipeline = [];
+
+  if (matchStage) {
+    pipeline.push(matchStage);
+  }
+
+  pipeline.push(
+    {
+      $lookup: {
+        from: School.collection.name,
+        localField: "school_id",
+        foreignField: "school_id",
+        as: "school",
+      },
+    },
+    {
+      $addFields: {
+        school_name: { $arrayElemAt: ["$school.school_name", 0] },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        dept_id: 1,
+        dept_name: 1,
+        school_id: 1,
+        school_name: 1,
+      },
+    },
+    {
+      $sort: { dept_name: 1 },
+    }
+  );
+
+  return pipeline;
+};
+
 export const createDepartment = async (req, res) => {
   try {
     let { dept_name, school_id } = req.body;
@@ -77,29 +115,39 @@ export const createDepartment = async (req, res) => {
   }
 };
 
-export const getAllDepartments = async (req, res) => {
+export const getDepartments = async (req, res) => {
   try {
-    const { school_id } = req.query;
+    const search = req.query.search?.trim();
+    const schoolId = Number(req.query.schoolId);
+    const matchFilters = {};
 
-    let filter = {};
-    if (school_id) {
-      filter.school_id = school_id;
+    if (search) {
+      matchFilters.dept_name = { $regex: search, $options: "i" };
     }
 
-    const departments = await Department.find(filter)
-      .sort({ dept_name: 1 });
+    if (schoolId) {
+      matchFilters.school_id = schoolId;
+    }
+
+    const matchStage =
+      Object.keys(matchFilters).length > 0
+        ? { $match: matchFilters }
+        : null;
+
+    const departments = await Department.aggregate(
+      departmentListPipeline(matchStage)
+    );
 
     return res.status(200).json({
       success: true,
-      count: departments.length,
+      message: "Departments fetched successfully",
       data: departments,
     });
-
   } catch (error) {
-    console.error("Get Departments Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Error fetching departments",
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };

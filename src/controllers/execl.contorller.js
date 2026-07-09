@@ -1,164 +1,206 @@
 import xlsx from "xlsx";
+import bcrypt from "bcryptjs";
 import Employee from "../models/user/employee.model.js";
 import Department from "../models/office/department.model.js";
-import { createUserService } from "../controllers/userController.js";
+import { generateEmpId } from "../utility/generateEmpId.js";
+import { sendCredentialsNotification } from "../controllers/userController.js";
+import { generateDefaultPassword, validatePasswordStrength } from "../controllers/userController.js";
+
+const nameRegex   = /^[a-zA-Z\s]+$/;
+const emailRegex  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const mobileRegex = /^\d{10}$/;
+
+// ── Ek row ko process karne ka kaam ──
+const processRow = async (row, deptMap, dbEmails, dbMobiles, seenEmails, seenMobiles) => {
+  const { _rowNum, emp_name, designation, mobile_number, email, dept_name } = row;
+
+  const baseData = {
+    row:           _rowNum,
+    emp_name:      emp_name      || "N/A",
+    email:         email         || "N/A",
+    mobile_number: mobile_number || "N/A",
+    designation:   designation   || "N/A",
+    dept_name:     dept_name     || "N/A",
+  };
+
+  // ── Already exists — SKIP ──
+  const emailExists  = dbEmails.has(email);
+  const mobileExists = dbMobiles.has(mobile_number);
+
+  if (emailExists || mobileExists) {
+    return {
+      type: "skipped",
+      data: {
+        ...baseData,
+        reason: emailExists
+          ? `Email already registered: ${email}`
+          : `Mobile already registered: ${mobile_number}`,
+      },
+    };
+  }
+
+  // ── Excel duplicate ──
+  if (seenEmails.has(email)) {
+    return {
+      type: "error",
+      data: { ...baseData, error: `Duplicate email in this file: ${email}` },
+    };
+  }
+  if (seenMobiles.has(mobile_number)) {
+    return {
+      type: "error",
+      data: { ...baseData, error: `Duplicate mobile in this file: ${mobile_number}` },
+    };
+  }
+
+  // ── Validation ──
+  try {
+    if (!emp_name || !designation || !mobile_number || !email || !dept_name)
+      throw new Error("Missing required fields");
+    if (!nameRegex.test(emp_name))
+      throw new Error("Invalid name (only alphabets allowed)");
+    if (!emailRegex.test(email))
+      throw new Error("Invalid email format");
+    if (!mobileRegex.test(mobile_number))
+      throw new Error("Mobile must be exactly 10 digits");
+
+    const dept = deptMap.get(dept_name);
+    if (!dept) throw new Error(`Department not found: ${dept_name}`);
+
+    const defaultPassword = generateDefaultPassword(emp_name, mobile_number);
+    const passwordCheck   = validatePasswordStrength(defaultPassword);
+    if (!passwordCheck.valid)
+      throw new Error(`Password policy failed: ${passwordCheck.message}`);
+
+    // ── Hash + EmpId parallel ──
+    const [hashedPassword, emp_id] = await Promise.all([
+      bcrypt.hash(defaultPassword, 10),
+      generateEmpId(),
+    ]);
+
+    const user = await Employee.create({
+      emp_id,
+      emp_name,
+      designation,
+      mobile_number,
+      email,
+      dept_id:        dept.dept_id,
+      school_id:      dept.school_id,
+      password:       hashedPassword,
+      role_ids:       [],
+      active_role_id: null,
+    });
+
+    // ── Email fire-and-forget — response wait nahi karega ──
+    sendCredentialsNotification({ emp_id, emp_name, email, defaultPassword })
+      .catch(err => console.error(`Email failed for ${email}:`, err));
+
+    // Seen sets update
+    seenEmails.add(email);
+    seenMobiles.add(mobile_number);
+    dbEmails.add(email);
+    dbMobiles.add(mobile_number);
+
+    return {
+      type: "inserted",
+      data: { row: _rowNum, emp_id: user.emp_id, emp_name, email },
+    };
+
+  } catch (err) {
+    return {
+      type: "error",
+      data: { ...baseData, error: err.message },
+    };
+  }
+};
 
 export const bulkSignup = async (req, res) => {
   try {
-    if (!req.file) {
-      console.log("FILE NOT RECEIVED:", req.file);
-      return res.status(400).json({
-        success: false,
-        message: "No file uploaded",
-      });
-    }
-
-    if (!req.file.buffer) {
-      console.log(" FILE OBJECT:", req.file);
-      throw new Error("File buffer missing");
-    }
+    if (!req.file || !req.file.buffer)
+      return res.status(400).json({ success: false, message: "No file uploaded" });
 
     const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+    const sheet    = workbook.Sheets[workbook.SheetNames[0]];
+    const data     = xlsx.utils.sheet_to_json(sheet);
 
-    console.log(" Sheet Names:", workbook.SheetNames);
+    if (!data.length)
+      return res.status(400).json({ success: false, message: "Excel is empty" });
 
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    const data = xlsx.utils.sheet_to_json(sheet);
-
-    console.log(" FULL DATA:", data);
-    console.log(" FIRST ROW:", data[0]);
-
-    if (!data.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Excel is empty",
+    // ── Step 1: Normalize ──
+    const normalizedRows = data.map((row, i) => {
+      const n = {};
+      Object.keys(row).forEach(k => {
+        n[k.trim().toLowerCase().replace(/\s+/g, "_")] = row[k];
       });
-    }
-
-    //  FIXED: Dynamic dept extraction
-    const deptNames = [
-      ...new Set(
-        data.map(row => {
-          const deptKey = Object.keys(row).find(k =>
-            k.toLowerCase().includes("department")
-          );
-
-          const value = row[deptKey]?.toString().toLowerCase().trim();
-
-          console.log(" Extracted Dept:", value);
-
-          return value;
-        })
-      )
-    ];
-
-    console.log("FINAL DEPT NAMES:", deptNames);
-
-    const departments = await Department.find({
-      dept_name: {
-        $in: deptNames.map(name => new RegExp(`^${name}$`, "i")),
-      },
+      return {
+        _rowNum:       i + 2,
+        emp_name:      (n.emp_name || n.employee_name)?.toString().trim(),
+        designation:   n.designation?.toString().trim(),
+        mobile_number: n.mobile_number?.toString().replace(/\D/g, "").slice(0, 10),
+        email:         n.email?.toString().trim().toLowerCase(),
+        dept_name:     (n.dept_name || n.department)?.toString().trim().toLowerCase(),
+      };
     });
 
-    console.log(" DB DEPARTMENTS FOUND:", departments);
+    // ── Step 2: Department map ──
+    const allDepts = await Department.find({});
+    const deptMap  = new Map(allDepts.map(d => [d.dept_name.trim().toLowerCase(), d]));
 
-    const deptMap = new Map(
-      departments.map(d => [d.dept_name.toLowerCase().trim(), d])
-    );
-
-    console.log("DEPT MAP KEYS:", [...deptMap.keys()]);
-
-    //  Normalize emails/mobiles properly
-    const emails = data.map(d => d.email?.toString().toLowerCase().trim());
-    const mobiles = data.map(d => d.mobile_number?.toString().trim());
+    // ── Step 3: Existing users ek baar fetch ──
+    const allEmails  = normalizedRows.map(r => r.email).filter(Boolean);
+    const allMobiles = normalizedRows.map(r => r.mobile_number).filter(Boolean);
 
     const existingUsers = await Employee.find({
       $or: [
-        { email: { $in: emails } },
-        { mobile_number: { $in: mobiles } },
+        { email:         { $in: allEmails  } },
+        { mobile_number: { $in: allMobiles } },
       ],
     });
 
-    const existingEmails = new Set(existingUsers.map(u => u.email));
-    const existingMobiles = new Set(existingUsers.map(u => u.mobile_number));
+    const dbEmails  = new Set(existingUsers.map(u => u.email));
+    const dbMobiles = new Set(existingUsers.map(u => u.mobile_number));
 
-    const seenEmails = new Set();
+    // ── Step 4: Batch processing — 50 rows ek saath ──
+    const BATCH_SIZE = 50;
+    const seenEmails  = new Set();
     const seenMobiles = new Set();
 
     const inserted = [];
-    const errors = [];
+    const skipped  = [];
+    const errors   = [];
 
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
+    for (let i = 0; i < normalizedRows.length; i += BATCH_SIZE) {
+      const batch = normalizedRows.slice(i, i + BATCH_SIZE);
 
-      console.log("\n Processing row:", i + 2);
-      console.log("Row Data:", row);
+      const results = await Promise.all(
+        batch.map(row =>
+          processRow(row, deptMap, dbEmails, dbMobiles, seenEmails, seenMobiles)
+        )
+      );
 
-      try {
-        //  normalize row values
-        const email = Object.values(row).find(v =>
-          typeof v === "string" && v.includes("@")
-        )?.toLowerCase().trim();
-
-        const mobile = Object.values(row).find(v =>
-          typeof v === "number" || /^\d+$/.test(v)
-        )?.toString().trim();
-
-        console.log(" Email:", email);
-        console.log(" Mobile:", mobile);
-
-        if (seenEmails.has(email) || seenMobiles.has(mobile)) {
-          throw new Error("Duplicate in Excel");
-        }
-
-        if (existingEmails.has(email) || existingMobiles.has(mobile)) {
-          throw new Error("User already exists");
-        }
-
-        // create user
-        const result = await createUserService(row, deptMap);
-
-        console.log(" User Created:", result);
-
-        //  move AFTER success
-        seenEmails.add(email);
-        seenMobiles.add(mobile);
-
-        inserted.push(result); //  FIXED (no .user)
-
-      } catch (err) {
-        console.log(" Error at row", i + 2, err.message);
-
-        errors.push({
-          row: i + 2,
-          message: err.message,
-        });
+      for (const result of results) {
+        if (result.type === "inserted") inserted.push(result.data);
+        else if (result.type === "skipped") skipped.push(result.data);
+        else errors.push(result.data);
       }
     }
 
-    console.log("\n FINAL RESULT:");
-    console.log("Inserted:", inserted.length);
-    console.log("Errors:", errors);
-
-    return res.status(201).json({
+    return res.status(207).json({
       success: true,
       message: "Bulk upload completed",
       summary: {
-        total: data.length,
+        total:    data.length,
         inserted: inserted.length,
-        failed: errors.length,
+        skipped:  skipped.length,
+        failed:   errors.length,
       },
+      inserted,
+      skipped,
       errors,
     });
 
   } catch (err) {
-    console.error(" Bulk Upload Error:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Bulk upload failed",
-    });
+    console.error("Bulk Upload Error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Bulk upload failed" });
   }
 };

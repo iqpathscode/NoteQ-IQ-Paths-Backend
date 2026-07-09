@@ -9,6 +9,56 @@ import School from "../models/office/school.model.js";
 import Admin from "../models/user/admin.model.js";
 import Power from "../models/userPowers/power.model.js";
 
+// const employeeDetailsPipeline = (matchStage = null) => {
+//   const pipeline = [];
+
+//   if (matchStage) {
+//     pipeline.push(matchStage);
+//   }
+
+//   pipeline.push(
+//     {
+//       $lookup: {
+//         from: Department.collection.name,
+//         localField: "dept_id",
+//         foreignField: "dept_id",
+//         as: "department",
+//       },
+//     },
+//     {
+//       $lookup: {
+//         from: Notesheet.collection.name,
+//         localField: "emp_id",
+//         foreignField: "emp_id",
+//         as: "notesheets",
+//       },
+//     },
+//     {
+//       $addFields: {
+//         department_name: { $arrayElemAt: ["$department.dept_name", 0] },
+//         notesheet_count: { $size: "$notesheets" },
+//       },
+//     },
+//     {
+//       $project: {
+//         _id: 0,
+//         emp_id: 1,
+//         emp_name: 1,
+//         designation: 1,
+//         role_ids: 1,
+//         active_role_id: 1,
+//         dept_id: 1,
+//         department_name: 1,
+//         notesheet_count: 1,
+//       },
+//     },
+//   );
+
+//   return pipeline;
+// };
+
+const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CLOSED", "IN_EXECUTION"];
+
 const employeeDetailsPipeline = (matchStage = null) => {
   const pipeline = [];
 
@@ -26,16 +76,148 @@ const employeeDetailsPipeline = (matchStage = null) => {
       },
     },
     {
+      // NOTE: foreignField "emp_id" se "created_by_emp_id" kiya —
+      // kyunki hume ye batana hai employee ne KYA CREATE kiya, na ki
+      // Notesheet.emp_id field (jo current holder / owner bhi ho sakta hai)
       $lookup: {
         from: Notesheet.collection.name,
         localField: "emp_id",
-        foreignField: "emp_id",
+        foreignField: "created_by_emp_id",
         as: "notesheets",
+      },
+    },
+    {
+      // role_ids resolve karne ke liye role_name laane ka lookup
+      $lookup: {
+        from: Role.collection.name, // apna actual Role collection name confirm kar lena
+        localField: "notesheets.created_by_role_id",
+        foreignField: "role_id", // Role model me numeric role_id field ka naam confirm kar lena
+        as: "rolesInfo",
       },
     },
     {
       $addFields: {
         department_name: { $arrayElemAt: ["$department.dept_name", 0] },
+
+        // ---- PERSONAL: created_by_role_id === null ----
+        personal_notesheets: {
+          $filter: {
+            input: "$notesheets",
+            as: "ns",
+            cond: { $eq: ["$$ns.created_by_role_id", null] },
+          },
+        },
+
+        // ---- ROLE-BASED: created_by_role_id !== null ----
+        role_notesheets: {
+          $filter: {
+            input: "$notesheets",
+            as: "ns",
+            cond: { $ne: ["$$ns.created_by_role_id", null] },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        // ---- Personal summary (status-wise) ----
+        personal_summary: {
+          total: { $size: "$personal_notesheets" },
+          byStatus: {
+            $arrayToObject: {
+              $map: {
+                input: STATUSES,
+                as: "st",
+                in: [
+                  "$$st",
+                  {
+                    $size: {
+                      $filter: {
+                        input: "$personal_notesheets",
+                        as: "ns",
+                        cond: { $eq: ["$$ns.status", "$$st"] },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+
+        // is employee ne jitne distinct roles se notesheets banayi hain
+        distinct_role_ids: {
+          $setUnion: ["$role_notesheets.created_by_role_id", []],
+        },
+      },
+    },
+    {
+      $addFields: {
+        // ---- Role-wise summary (har role ka alag total + status breakdown) ----
+        role_wise_summary: {
+          $map: {
+            input: "$distinct_role_ids",
+            as: "rid",
+            in: {
+              role_id: "$$rid",
+              role_name: {
+                $let: {
+                  vars: {
+                    matchedRole: {
+                      $arrayElemAt: [
+                        {
+                          $filter: {
+                            input: "$rolesInfo",
+                            as: "r",
+                            cond: { $eq: ["$$r.role_id", "$$rid"] },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  },
+                  in: { $ifNull: ["$$matchedRole.role_name", "Unknown Role"] },
+                },
+              },
+              total: {
+                $size: {
+                  $filter: {
+                    input: "$role_notesheets",
+                    as: "ns",
+                    cond: { $eq: ["$$ns.created_by_role_id", "$$rid"] },
+                  },
+                },
+              },
+              byStatus: {
+                $arrayToObject: {
+                  $map: {
+                    input: STATUSES,
+                    as: "st",
+                    in: [
+                      "$$st",
+                      {
+                        $size: {
+                          $filter: {
+                            input: "$role_notesheets",
+                            as: "ns",
+                            cond: {
+                              $and: [
+                                { $eq: ["$$ns.created_by_role_id", "$$rid"] },
+                                { $eq: ["$$ns.status", "$$st"] },
+                              ],
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        // backward-compatible flat total (agar kahi already use ho raha ho)
         notesheet_count: { $size: "$notesheets" },
       },
     },
@@ -50,12 +232,16 @@ const employeeDetailsPipeline = (matchStage = null) => {
         dept_id: 1,
         department_name: 1,
         notesheet_count: 1,
+        personal_summary: 1,
+        role_wise_summary: 1,
       },
     },
   );
 
   return pipeline;
 };
+
+
 
 export const getEmployeesWithDetails = async (req, res) => {
   try {
@@ -116,52 +302,139 @@ export const getEmployeeDetailsById = async (req, res) => {
 export const getEmployeeNotesheetSummary = async (req, res) => {
   try {
     const empId = Number(req.params.empId);
+    console.log("🔍 [Summary] Request received for empId:", empId);
 
     if (!empId) {
+      console.log("❌ [Summary] empId missing/invalid");
       return res.status(400).json({
         success: false,
         message: "empId is required",
       });
     }
 
-    // Deleted ko exclude karke total count
-    const totalCount = await Notesheet.countDocuments({
-      emp_id: empId,
-      is_deleted: { $ne: true },
+    // ✅ FIXED: "EXECUTION_STARTED" -> "IN_EXECUTION" (DB ke actual status value se match)
+    const STATUSES = [
+      "PENDING",
+      "APPROVED",
+      "REJECTED",
+      "CLOSED",
+      "IN_EXECUTION",
+    ];
+
+    const emptyStatusMap = () =>
+      STATUSES.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
+
+    // ---------------------------------------------------------
+    // 1) EMPLOYEE'S OWN PERSONAL SUMMARY
+    //    created_by_emp_id = empId  AND  created_by_role_id = null
+    // ---------------------------------------------------------
+    const ownAgg = await Notesheet.aggregate([
+      {
+        $match: {
+          created_by_emp_id: empId,
+          created_by_role_id: null,
+          is_deleted: { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const ownByStatus = emptyStatusMap();
+    let ownTotal = 0;
+    ownAgg.forEach((r) => {
+      if (ownByStatus.hasOwnProperty(r._id)) ownByStatus[r._id] = r.count;
+      ownTotal += r.count;
     });
 
-    const pendingCount = await Notesheet.countDocuments({
-      emp_id: empId,
-      status: "PENDING",
-      is_deleted: { $ne: true },
+    // ---------------------------------------------------------
+    // 2) ROLE-WISE SUMMARY
+    //    created_by_emp_id = empId  AND  created_by_role_id != null
+    //    grouped by created_by_role_id
+    // ---------------------------------------------------------
+    const roleWiseAgg = await Notesheet.aggregate([
+      {
+        $match: {
+          created_by_emp_id: empId,
+          created_by_role_id: { $ne: null },
+          is_deleted: { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            role_id: "$created_by_role_id",
+            status: "$status",
+          },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        // ✅ FIXED: created_by_role_id Number hai, Role collection ka ObjectId "_id" nahi.
+        // isliye "role_id" (numeric field) se match karo, na ki "_id" se.
+        $lookup: {
+          from: "roles", // apna actual Role collection ka naam confirm kar lena
+          localField: "_id.role_id",
+          foreignField: "role_id", // Role model me numeric field ka naam confirm kar lena
+          as: "roleInfo",
+        },
+      },
+    ]);
+
+    const roleMap = {};
+
+    roleWiseAgg.forEach((r) => {
+      const roleId = String(r._id.role_id);
+      const status = r._id.status;
+      const roleName = r.roleInfo?.[0]?.role_name || "Unknown Role";
+
+      if (!roleMap[roleId]) {
+        roleMap[roleId] = {
+          role_id: roleId,
+          role_name: roleName,
+          total: 0,
+          byStatus: emptyStatusMap(),
+        };
+      }
+
+      if (roleMap[roleId].byStatus.hasOwnProperty(status)) {
+        roleMap[roleId].byStatus[status] = r.count;
+      }
+      roleMap[roleId].total += r.count;
     });
 
-    const approvedCount = await Notesheet.countDocuments({
-      emp_id: empId,
-      status: "APPROVED",
-      is_deleted: { $ne: true },
+    // ---------------------------------------------------------
+    // 3) GRAND TOTAL (own + all roles combined)
+    // ---------------------------------------------------------
+    const grandTotal = ownTotal + Object.values(roleMap).reduce((sum, r) => sum + r.total, 0);
+    const grandByStatus = emptyStatusMap();
+    STATUSES.forEach((s) => {
+      grandByStatus[s] =
+        ownByStatus[s] + Object.values(roleMap).reduce((sum, r) => sum + r.byStatus[s], 0);
     });
 
-    const closedCount = await Notesheet.countDocuments({
-      emp_id: empId,
-      status: "CLOSED",
-      is_deleted: { $ne: true },
-    });
     return res.status(200).json({
       success: true,
-      message: "User-specific notesheet summary fetched successfully",
+      message: "Employee personal + role-wise notesheet summary fetched successfully",
       data: {
         emp_id: empId,
-        total: totalCount,
-        byStatus: {
-          PENDING: pendingCount,
-          APPROVED: approvedCount,
-          CLOSED: closedCount,
+        grandTotal: {
+          total: grandTotal,
+          byStatus: grandByStatus,
         },
+        ownProfile: {
+          total: ownTotal,
+          byStatus: ownByStatus,
+        },
+        roleWise: Object.values(roleMap),
       },
     });
   } catch (error) {
-    console.error("Summary Error:", error);
+    console.error("❌ [Summary Error]:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -311,99 +584,10 @@ export const assignRoleToFaculty = async (req, res) => {
   }
 };
 
-// export const updateRoleOfFaculty = async (req, res) => {
-//   try {
-//     const { emp_id, role_id } = req.body;
-
-//     if (!emp_id || !role_id) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Employee ID and Role ID are required",
-//       });
-//     }
-
-//     const employee = await Employee.findOne({ emp_id });
-//     if (!employee) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Employee not found",
-//       });
-//     }
-
-//     const role = await Role.findOne({ role_id });
-//     if (!role) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Role not found",
-//       });
-//     }
-
-//     // ---------------- HOD UNIQUE CHECK ----------------
-//     if (role.role_name.toUpperCase().includes("HOD")) {
-//       const existingHOD = await Employee.findOne({
-//         roles: {
-//           $elemMatch: {
-//             role_name: { $regex: /HOD/i },
-//             dept_id: role.dept_id,
-//           },
-//         },
-//       });
-
-//       if (existingHOD && existingHOD.emp_id !== emp_id) {
-//         return res.status(400).json({
-//           success: false,
-//           message: `This department already has an HOD assigned (${existingHOD.emp_id})`,
-//         });
-//       }
-//     }
-
-//     // ---------------- Update active_role ----------------
-//     employee.active_role_id = {
-//       role_id: role.role_id,
-//       role_name: role.role_name,
-//       dept_id: role.dept_id,
-//       power_id: role.power_id,
-//       power_level: role.power_level ?? 0,
-//       canReceiveNotesheet: role.canReceiveNotesheet ?? false,
-//     };
-
-//     // ---------------- Update roles array ----------------
-//     const index = employee.roles.findIndex((r) => r.role_id === role.role_id);
-//     if (index !== -1) {
-//       // Replace existing role
-//       employee.roles[index] = employee.active_role_id;
-//     } else {
-//       // Add new role if missing
-//       employee.roles.push(employee.active_role_id);
-//     }
-
-//     await employee.save();
-
-//     return res.json({
-//       success: true,
-//       message: "Role updated successfully!",
-//       data: employee,
-//     });
-//   } catch (error) {
-//     console.error("Update Role Error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
 export const switchEmployeeRole = async (req, res) => {
   try {
     const { role_id } = req.body;
     const empId = req.user.emp_id;
-
-    if (!role_id) {
-      return res
-        .status(400)
-        .json({ success: false, message: "role_id is required" });
-    }
 
     const employee = await Employee.findOne({ emp_id: empId });
     if (!employee) {
@@ -411,6 +595,42 @@ export const switchEmployeeRole = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Employee not found" });
     }
+
+    // =========================
+    // PERSONAL MODE (role_id is null)
+    // =========================
+    if (role_id === null || role_id === undefined) {
+      employee.active_role_id = null;
+      employee.active_role = null;
+      await employee.save();
+
+      const token = jwt.sign(
+        {
+          emp_id: employee.emp_id,
+          role_id: null,
+          dept_id: employee.dept_id,
+          isAdmin: employee.isAdmin || false,
+        },
+        env.JWT_SECRET,
+        { expiresIn: env.JWT_EXPIRES_IN },
+      );
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: false, // change to true in production with HTTPS
+      });
+
+      return res.json({
+        success: true,
+        message: "Switched to personal profile",
+        active_role: null,
+      });
+    }
+
+    // =========================
+    // ROLE MODE (existing logic)
+    // =========================
 
     // Check role against role_ids array
     const hasRole = employee.role_ids.includes(Number(role_id));
@@ -458,9 +678,6 @@ export const switchEmployeeRole = async (req, res) => {
       sameSite: "strict",
       secure: false, // change to true in production with HTTPS
     });
-
-    // console.log("active role after switch:", employee.active_role);
-    // console.log("New role token:", roleFromRoleTable.role_id);
 
     res.json({
       success: true,

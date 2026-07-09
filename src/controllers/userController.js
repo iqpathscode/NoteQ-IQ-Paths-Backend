@@ -44,7 +44,7 @@ export const validatePasswordStrength = (password) => {
 };
 
 // ─── Notification Helper ──────────────────────────────────────────────────────
-const sendCredentialsNotification = async ({ emp_id, emp_name, email, defaultPassword }) => {
+export const sendCredentialsNotification = async ({ emp_id, emp_name, email, defaultPassword }) => {
   const htmlBody = `
     <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       <div style="background: #1d4ed8; padding: 24px 32px;">

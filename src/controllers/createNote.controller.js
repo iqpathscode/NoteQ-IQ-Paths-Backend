@@ -27,200 +27,6 @@ const ACTION_STATUS = {
 // ============================================================
 // CREATE NOTESHEET — fixed N+1 role fetch
 // ============================================================
-// export const createNotesheet = async (req, res) => {
-//   try {
-//     const {
-//       emp_id,
-//       dept_id,
-//       subject,
-//       category,
-//       priority,
-//       description,
-//       forward_to_role,
-//       attachments,
-//       mode,
-//       reference_notesheet_id,
-//     } = req.body;
-
-//     let finalAttachments = Array.isArray(attachments) ? attachments : [];
-
-//     const [sender, department] = await Promise.all([
-//       Employee.findOne({ emp_id }),
-//       Department.findOne({ dept_id }),
-//     ]);
-
-//     if (!sender)
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Sender not found" });
-//     if (!department)
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Department not found" });
-//     if (!category || !priority) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Category and Priority are required",
-//       });
-//     }
-
-//     // ---- SENDER ROLE ----
-//     let senderRole = null;
-//     let employeeLevel = 0;
-
-//     if (sender.active_role_id) {
-//       senderRole = await Role.findOne({ role_id: sender.active_role_id });
-//       if (senderRole) {
-//         const power = await Power.findOne({ power_id: senderRole.power_id });
-//         employeeLevel = power?.power_level ?? 0;
-//       }
-//     }
-
-//     // ---- RESOLVE NEXT ROLE ----
-//     let forward_to_role_id = null;
-//     let forward_to_dept_id = null;
-//     let level = null;
-//     let nextRole = null;
-//     let nextApprover = null;
-
-//     if (Number(mode) === 1) {
-//       // DIRECT MODE
-//       nextRole = await Role.findOne({ role_id: Number(forward_to_role) });
-//       if (!nextRole)
-//         return res
-//           .status(404)
-//           .json({ success: false, message: "Target role not found" });
-
-//       const power = await Power.findOne({ power_id: nextRole.power_id });
-//       forward_to_role_id = nextRole.role_id;
-//       forward_to_dept_id = dept_id;
-//       level = power?.power_level ?? null;
-
-//       nextApprover = await Employee.findOne({
-//         $or: [
-//           { active_role_id: nextRole.role_id, is_active: true },
-//           { role_ids: { $in: [Number(nextRole.role_id)] }, is_active: true },
-//         ],
-//       });
-//     }
-
-//     if (Number(mode) === 0) {
-//       // CHAIN MODE
-//       const allRoles = await Role.find({ canReceiveNotesheet: true });
-//       const powerIds = [
-//         ...new Set(allRoles.map((r) => r.power_id).filter(Boolean)),
-//       ];
-//       const allPowers = await Power.find({ power_id: { $in: powerIds } });
-//       const powerMap = Object.fromEntries(
-//         allPowers.map((p) => [p.power_id, p]),
-//       );
-
-//       const eligible = allRoles
-//         .map((r) => ({ role: r, power: powerMap[r.power_id] ?? null }))
-//         .filter(
-//           (rp) =>
-//             rp.power?.power_type === "APPROVAL" &&
-//             rp.power.power_level > employeeLevel,
-//         )
-//         .sort((a, b) => a.power.power_level - b.power.power_level);
-
-//       if (!eligible.length) {
-//         return res.status(404).json({
-//           success: false,
-//           message: "No next approver role found above your level",
-//         });
-//       }
-
-//       const best = eligible[0];
-//       nextRole = best.role;
-//       forward_to_role_id = nextRole.role_id;
-//       forward_to_dept_id = nextRole.dept_ids?.[0] ?? null;
-//       level = best.power.power_level;
-
-//       nextApprover = await Employee.findOne({
-//         $or: [
-//           { active_role_id: Number(nextRole.role_id), is_active: true },
-//           { role_ids: { $in: [Number(nextRole.role_id)] }, is_active: true },
-//         ],
-//       });
-//     }
-
-//     if (!nextApprover) {
-//       return res.status(404).json({
-//         success: false,
-//         message: `No active employee found for approver role: ${nextRole?.role_name ?? "unknown"}`,
-//       });
-//     }
-
-//     // ---- NOTE ID ----
-//     const generateDeptCode = (name) => {
-//       const words = name.trim().split(" ");
-//       return words.length > 1
-//         ? words
-//             .map((w) => w[0])
-//             .join("")
-//             .toUpperCase()
-//         : words[0].substring(0, 3).toUpperCase();
-//     };
-
-//     const baseCode =
-//       department.dept_code || generateDeptCode(department.dept_name);
-//     const counter = await Counter.findOneAndUpdate(
-//       { name: `note_id_${baseCode}` },
-//       { $inc: { seq: 1 } },
-//       { new: true, upsert: true },
-//     );
-//     const customNoteId = `NS_${baseCode}_${String(counter.seq).padStart(3, "0")}`;
-
-//     // ---- CREATE NOTESHEET ----
-//     const notesheet = await Notesheet.create({
-//       note_id: customNoteId,
-//       emp_id,
-//       dept_id,
-//       subject,
-//       description,
-//       category,
-//       priority,
-//       forward_to_role_id,
-//       forward_to_dept_id,
-//       created_by_emp_id: sender.emp_id,
-//       created_by_role_id: senderRole?.role_id ?? null,
-//       attachments: finalAttachments,
-//       mode: Number(mode),
-//       level,
-//       status: "PENDING",
-//       current_holder_emp_id: nextApprover.emp_id,
-//       reference_notesheet_id: reference_notesheet_id ?? null,
-//     });
-
-//     // ✅ FIX: senderRole already fetched above — no extra DB call
-//     await NotesheetFlow.create({
-//       note_id: notesheet.note_id,
-//       from_emp_id: sender.emp_id,
-//       from_emp_name: sender.emp_name,
-//       from_role_id: senderRole?.role_id ?? null,
-//       from_role_name: senderRole?.role_name ?? "Employee", // ✅ no extra await
-//       to_emp_id: nextApprover.emp_id,
-//       to_emp_name: nextApprover.emp_name,
-//       to_role_id: forward_to_role_id,
-//       to_role_name: nextRole?.role_name ?? null,
-//       to_dept_id: forward_to_dept_id,
-//       action: "CREATED",
-//       remark: description ?? null,
-//       level,
-//       final_status: "PENDING",
-//     });
-
-//     return res.status(201).json({
-//       success: true,
-//       message: "Notesheet created successfully",
-//       data: notesheet,
-//     });
-//   } catch (error) {
-//     console.error("CREATE NOTESHEET ERROR:", error);
-//     return res.status(500).json({ success: false, message: error.message });
-//   }
-// };
 
 export const createNotesheet = async (req, res) => {
   try {
@@ -481,6 +287,7 @@ export const createNotesheet = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 export const getEligibleRoles = async (req, res) => {
   try {
@@ -1416,16 +1223,10 @@ export const forwardChainOnly = async (req, res) => {
       }
     }
 
-    // ─────────────────────────────────────────
-    // 6. KEY FIX: Next employee dhundo
-    //    - active_role_id NAHI check karo (kyunki user ka active role different ho sakta hai)
-    //    - role_ids[] mein nextRole exist kare + same dept ho
-    // ─────────────────────────────────────────
-
-    // PRIORITY 1: Same dept ka employee jiske role_ids mein nextRole hai
+     // PRIORITY 1: Same dept ka employee jiske role_ids mein nextRole hai
     let nextEmployee = await Employee.findOne({
       role_ids: { $in: [Number(nextRole.role_id)] },
-      dept_id: notesheetDeptId, // ✅ Same dept — CSE → CSE HOD, IT → IT HOD
+      dept_id: notesheetDeptId,
       is_active: true,
     });
 
@@ -1444,9 +1245,22 @@ export const forwardChainOnly = async (req, res) => {
       });
     }
 
+    // ✅ NEW CHECK — role kisi bhi employee ko assign hai ya nahi (active ho ya na ho)
+    if (!nextEmployee) {
+      const roleEverAssigned = await Employee.exists({
+        role_ids: { $in: [Number(nextRole.role_id)] },
+      });
+      if (!roleEverAssigned) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: `Role "${nextRole.role_name}" is not currently assigned to any employee. Cannot forward.`,
+        });
+      }
+    }
+
     // ─────────────────────────────────────────
     // 7. targetDeptId — ALWAYS notesheet ki original dept rakho
-    //    Isse chain poora correct dept pe track hoga
     // ─────────────────────────────────────────
     const targetDeptId = notesheetDeptId;
 
@@ -1458,9 +1272,11 @@ export const forwardChainOnly = async (req, res) => {
     await NotesheetFlow.updateMany(
       { note_id, final_status: "PENDING" },
       { $set: { final_status: "RESOLVED" } },
+      { session },
       { session }
     );
 
+    // Notesheet update karo
     // Notesheet update karo
     notesheet.forward_to_role_id = nextRole.role_id;
     notesheet.forward_to_emp_id = nextEmployee?.emp_id ?? null;
@@ -1470,6 +1286,7 @@ export const forwardChainOnly = async (req, res) => {
     notesheet.updated_by = user.emp_id;
     await notesheet.save({ session });
 
+    // Naya flow entry create karo
     // Naya flow entry create karo
     await NotesheetFlow.create(
       [
@@ -1518,24 +1335,16 @@ export const forwardExecutionNotesheet = async (req, res) => {
     const currentRoleId = user.active_role_id || user.role_id;
 
     if (!currentRoleId)
-      return res
-        .status(400)
-        .json({ success: false, message: "User role missing" });
+      return res.status(400).json({ success: false, message: "User role missing" });
     if (!roleId)
-      return res
-        .status(400)
-        .json({ success: false, message: "Please select role" });
+      return res.status(400).json({ success: false, message: "Please select role" });
 
     const notesheet = await Notesheet.findOne({ note_id: noteId });
     if (!notesheet)
-      return res
-        .status(404)
-        .json({ success: false, message: "Notesheet not found" });
+      return res.status(404).json({ success: false, message: "Notesheet not found" });
 
     if (!["APPROVED", "IN_EXECUTION"].includes(notesheet.status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Notesheet is not in valid state" });
+      return res.status(400).json({ success: false, message: "Notesheet is not in valid state" });
     }
 
     const lastApproval = await NotesheetFlow.findOne({
@@ -1543,23 +1352,17 @@ export const forwardExecutionNotesheet = async (req, res) => {
       action: "APPROVED",
     }).sort({ createdAt: -1 });
     if (!lastApproval)
-      return res
-        .status(400)
-        .json({ success: false, message: "Notesheet not approved yet" });
+      return res.status(400).json({ success: false, message: "Notesheet not approved yet" });
 
     if (Number(lastApproval.from_role_id) !== Number(currentRoleId)) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Only approving role can start execution",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Only approving role can start execution",
+      });
     }
 
     if (Number(currentRoleId) === Number(roleId)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Cannot forward to same role" });
+      return res.status(400).json({ success: false, message: "Cannot forward to same role" });
     }
 
     const [currentRole, executionRole, employee] = await Promise.all([
@@ -1568,13 +1371,24 @@ export const forwardExecutionNotesheet = async (req, res) => {
       Employee.findOne({ emp_id: user.emp_id }),
     ]);
     if (!executionRole)
-      return res
-        .status(404)
-        .json({ success: false, message: "Selected role not found" });
+      return res.status(404).json({ success: false, message: "Selected role not found" });
 
     const executionEmployee = await Employee.findOne({
       $or: [{ active_role_id: Number(roleId) }, { role_ids: Number(roleId) }],
     });
+
+    // ✅ NEW CHECK — role kisi bhi employee ko assign hai ya nahi
+    if (!executionEmployee) {
+      const roleEverAssigned = await Employee.exists({
+        $or: [{ active_role_id: Number(roleId) }, { role_ids: Number(roleId) }],
+      });
+      if (!roleEverAssigned) {
+        return res.status(400).json({
+          success: false,
+          message: `Role "${executionRole.role_name}" is not currently assigned to any employee. Cannot forward.`,
+        });
+      }
+    }
 
     notesheet.status = "IN_EXECUTION";
     notesheet.lifecycle_status = "OPEN";
@@ -1598,7 +1412,7 @@ export const forwardExecutionNotesheet = async (req, res) => {
       action: "EXECUTION_STARTED",
       remark: comment || null,
       level: currentRole?.power_level || notesheet.level || 1,
-      final_status: ACTION_STATUS.EXECUTION_STARTED, // 'PENDING'
+      final_status: ACTION_STATUS.EXECUTION_STARTED,
     });
 
     return res.json({
@@ -1701,6 +1515,7 @@ export const completeExecutionNotesheet = async (req, res) => {
       noteId,
       subject: notesheet.subject,
       actionBy: employee?.emp_name || "Unknown",
+      actionByRole: role?.role_name,
       remark,
     });
 
