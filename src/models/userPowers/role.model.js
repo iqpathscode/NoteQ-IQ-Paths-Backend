@@ -38,6 +38,15 @@ view_dept_ids: {
   type: [Number],
   default: [],  
   },
+    app_view_scope: {
+      type: String,
+      enum: ["OWN", "DEPARTMENT", "ALL"],
+      default: "OWN",
+    },
+    app_view_dept_ids: {
+      type: [Number],
+      default: [],
+    },
 },
   { timestamps: true }
 );

@@ -52,6 +52,10 @@ const employeeSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isDefaultPassword: {
+  type: Boolean,
+  default: true,
+},
 
     // optional (if needed)
     assigned_dept_id: { type: Number },
