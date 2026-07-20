@@ -9,54 +9,6 @@ import School from "../models/office/school.model.js";
 import Admin from "../models/user/admin.model.js";
 import Power from "../models/userPowers/power.model.js";
 
-// const employeeDetailsPipeline = (matchStage = null) => {
-//   const pipeline = [];
-
-//   if (matchStage) {
-//     pipeline.push(matchStage);
-//   }
-
-//   pipeline.push(
-//     {
-//       $lookup: {
-//         from: Department.collection.name,
-//         localField: "dept_id",
-//         foreignField: "dept_id",
-//         as: "department",
-//       },
-//     },
-//     {
-//       $lookup: {
-//         from: Notesheet.collection.name,
-//         localField: "emp_id",
-//         foreignField: "emp_id",
-//         as: "notesheets",
-//       },
-//     },
-//     {
-//       $addFields: {
-//         department_name: { $arrayElemAt: ["$department.dept_name", 0] },
-//         notesheet_count: { $size: "$notesheets" },
-//       },
-//     },
-//     {
-//       $project: {
-//         _id: 0,
-//         emp_id: 1,
-//         emp_name: 1,
-//         designation: 1,
-//         role_ids: 1,
-//         active_role_id: 1,
-//         dept_id: 1,
-//         department_name: 1,
-//         notesheet_count: 1,
-//       },
-//     },
-//   );
-
-//   return pipeline;
-// };
-
 const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CLOSED", "IN_EXECUTION"];
 
 const employeeDetailsPipeline = (matchStage = null) => {
@@ -241,8 +193,6 @@ const employeeDetailsPipeline = (matchStage = null) => {
   return pipeline;
 };
 
-
-
 export const getEmployeesWithDetails = async (req, res) => {
   try {
     const employees = await Employee.aggregate(employeeDetailsPipeline());
@@ -302,17 +252,17 @@ export const getEmployeeDetailsById = async (req, res) => {
 export const getEmployeeNotesheetSummary = async (req, res) => {
   try {
     const empId = Number(req.params.empId);
-    console.log("🔍 [Summary] Request received for empId:", empId);
+  
 
     if (!empId) {
-      console.log("❌ [Summary] empId missing/invalid");
+     
       return res.status(400).json({
         success: false,
         message: "empId is required",
       });
     }
 
-    // ✅ FIXED: "EXECUTION_STARTED" -> "IN_EXECUTION" (DB ke actual status value se match)
+    //  FIXED: "EXECUTION_STARTED" -> "IN_EXECUTION" (DB ke actual status value se match)
     const STATUSES = [
       "PENDING",
       "APPROVED",
@@ -410,16 +360,19 @@ export const getEmployeeNotesheetSummary = async (req, res) => {
     // ---------------------------------------------------------
     // 3) GRAND TOTAL (own + all roles combined)
     // ---------------------------------------------------------
-    const grandTotal = ownTotal + Object.values(roleMap).reduce((sum, r) => sum + r.total, 0);
+    const grandTotal =
+      ownTotal + Object.values(roleMap).reduce((sum, r) => sum + r.total, 0);
     const grandByStatus = emptyStatusMap();
     STATUSES.forEach((s) => {
       grandByStatus[s] =
-        ownByStatus[s] + Object.values(roleMap).reduce((sum, r) => sum + r.byStatus[s], 0);
+        ownByStatus[s] +
+        Object.values(roleMap).reduce((sum, r) => sum + r.byStatus[s], 0);
     });
 
     return res.status(200).json({
       success: true,
-      message: "Employee personal + role-wise notesheet summary fetched successfully",
+      message:
+        "Employee personal + role-wise notesheet summary fetched successfully",
       data: {
         emp_id: empId,
         grandTotal: {
@@ -804,9 +757,27 @@ export const transferRole = async (req, res) => {
     // =========================================================
     // UPDATE NOTESHEET FLOW
     // =========================================================
-    await NotesheetFlow.updateMany(
-      { to_role_id: roleIdNum, to_emp_id: null },
-      { $set: { to_emp_id: newUserId } },
+
+    await Notesheet.updateMany(
+      { forward_to_role_id: roleIdNum, status: "PENDING" },
+      {
+        $set: {
+          current_holder_emp_id: Number(newUserId),
+          forward_to_emp_id: Number(newUserId),
+        },
+      },
+    );
+    await Application.updateMany(
+      {
+        forward_to_role_id: roleIdNum,
+        status: { $in: ["PENDING", "QUERY_RAISED", "IN_EXECUTION"] },
+      },
+      {
+        $set: {
+          current_holder_emp_id: Number(newUserId),
+          forward_to_emp_id: Number(newUserId),
+        },
+      },
     );
 
     return res.status(200).json({
@@ -824,7 +795,7 @@ export const transferRole = async (req, res) => {
 
 export const getProfile = async (req, res) => {
   try {
-    console.log("USER FROM TOKEN:", req.user);
+    // console.log("USER FROM TOKEN:", req.user);
 
     //  ADMIN
     if (req.user.isAdmin) {
