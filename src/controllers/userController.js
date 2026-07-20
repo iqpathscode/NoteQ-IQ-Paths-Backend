@@ -8,7 +8,7 @@ import { sendMail } from "../utility/sendMail.js";
 
 // ─── Regex Validators ────────────────────────────────────────────────────────
 const nameRegex = /^[a-zA-Z\s]+$/;
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const mobileRegex = /^\d{10}$/;
 
 // ─── Password Generator ───────────────────────────────────────────────────────

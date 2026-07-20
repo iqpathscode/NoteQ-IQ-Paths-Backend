@@ -7,6 +7,7 @@ import Department from "../models/office/department.model.js";
 import ApplicationFlow from "../models/application/ApplicationFlow.model.js";
 import { Counter } from "../models/counter/counter.model.js";
 // import { sendNotesheetMail } from "../services/notesheetMail.servies.js";
+import { sendNotification } from "../utility/sendNotifications.js"; 
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 const mapAttachments = (files = []) =>
@@ -130,7 +131,11 @@ export const createApplication = async (req, res) => {
       nextRole = await Role.findOne({
         role_id: Number(forward_to_role),
         canReceiveNotesheet: true,
-        dept_ids: { $in: [applicationDeptId] },
+        $or: [
+          { dept_ids: { $exists: false } },
+          { dept_ids: { $size: 0 } },
+          { dept_ids: { $in: [applicationDeptId] } },
+        ],
       });
       if (!nextRole)
         return res.status(404).json({
@@ -270,8 +275,8 @@ export const createApplication = async (req, res) => {
       from_emp_name: sender.emp_name,
       from_role_id: senderRole?.role_id ?? null,
       from_role_name: senderRole?.role_name ?? "Employee",
-      to_emp_id: nextApprover.emp_id,
-      to_emp_name: nextApprover.emp_name,
+      to_emp_id: null,
+      to_emp_name: null,
       to_role_id: forward_to_role_id,
       to_role_name: nextRole?.role_name ?? "",
       to_dept_id: forward_to_dept_id,
@@ -286,6 +291,20 @@ export const createApplication = async (req, res) => {
       message: `Application submitted successfully. Reference ID: ${application.application_id}`,
       data: application,
     });
+
+    // 🔔 Notification
+    if (nextApprover?.emp_id) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: nextApprover.emp_id,
+        role_id: forward_to_role_id,
+        type: "RECEIVED",
+        reference_id: application.application_id,
+        reference_type: "Application",
+        title: "New Application Received",
+        message: `${application.subject} submitted by ${sender.emp_name}`,
+      }).catch((err) => console.error("Notification send failed (create app):", err));
+    }
   } catch (error) {
     console.error("CREATE APPLICATION ERROR:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -300,18 +319,18 @@ export const createApplication = async (req, res) => {
 export const getAllApplicationsByScope = async (req, res) => {
   try {
     const { role_id, empId, scope } = req.query;
- 
+
     if (!role_id && !empId) {
       return res.status(400).json({
         success: false,
         message: "role_id or empId is required",
       });
     }
- 
+
     let roleId = null;
     let empIdNum = empId ? Number(empId) : null;
     let activeRole = null;
- 
+
     // ✅ FIXED: empId ab role_id ke saath bhi parse hota hai (pehle sirf
     // "else" branch mein set hota tha, jab role_id na diya gaya ho).
     // Isse "MY" scope filter dono fields (created_by_emp_id + created_by_role_id)
@@ -325,12 +344,12 @@ export const getAllApplicationsByScope = async (req, res) => {
           message: "Role not found",
         });
       }
- 
+
       // agar empId nahi bheja gaya, employee lookup se fallback mat karo —
       // role_id explicitly diya gaya hai, use hi authoritative maano
     } else {
       empIdNum = Number(empId);
- 
+
       const employee = await Employee.findOne({ emp_id: empIdNum });
       if (!employee) {
         return res.status(404).json({
@@ -338,11 +357,11 @@ export const getAllApplicationsByScope = async (req, res) => {
           message: "Employee not found",
         });
       }
- 
+
       roleId = employee.active_role_id ? Number(employee.active_role_id) : null;
       activeRole = roleId ? await Role.findOne({ role_id: roleId }) : null;
     }
- 
+
     const roleDeptIds = (activeRole?.dept_ids || []).map(Number);
     const appViewDeptIds = (
       activeRole?.app_view_dept_ids ||
@@ -352,20 +371,20 @@ export const getAllApplicationsByScope = async (req, res) => {
     const allAccessibleDeptIds = [
       ...new Set([...roleDeptIds, ...appViewDeptIds]),
     ];
- 
+
     const appScope = activeRole?.app_view_scope || activeRole?.view_scope;
- 
+
     let allowedScopes = ["MY"];
     if (appScope === "ALL") {
       allowedScopes = ["MY", "DEPARTMENT", "ALL"];
     } else if (appScope === "DEPARTMENT") {
       allowedScopes = ["MY", "DEPARTMENT"];
     }
- 
+
     const appliedScope = allowedScopes.includes(scope) ? scope : "MY";
- 
+
     let filter = {};
- 
+
     // =========================
     // MY SCOPE — hamesha sirf khud (is role se) create ki hui applications,
     // chahe role ka view_scope kuch bhi ho (OWN / DEPARTMENT / ALL)
@@ -383,7 +402,7 @@ export const getAllApplicationsByScope = async (req, res) => {
         filter = { created_by_emp_id: empIdNum, created_by_role_id: null };
       }
     }
- 
+
     // =========================
     // DEPARTMENT — role ke accessible departments ki saari applications
     // (Dean: apne department(s) ki sabhi; ya specific dept select karke)
@@ -392,7 +411,7 @@ export const getAllApplicationsByScope = async (req, res) => {
       const requestedDept = req.query.departmentId
         ? Number(req.query.departmentId)
         : null;
- 
+
       if (allAccessibleDeptIds.length === 0) {
         filter = { _id: null };
       } else if (requestedDept !== null) {
@@ -403,53 +422,53 @@ export const getAllApplicationsByScope = async (req, res) => {
         filter = { dept_id: { $in: allAccessibleDeptIds } };
       }
     }
- 
+
     // =========================
     // ALL — VC/PVC jaise roles ke liye, system ki saari applications
     // =========================
     else {
       filter = {};
     }
- 
+
     const { status } = req.query;
     if (status && status !== "all") {
       filter.status = String(status).toUpperCase();
     }
- 
+
     const limit = req.query.limit ? Number(req.query.limit) : 100;
- 
+
     const applications = await Application.find({
       ...filter,
       is_deleted: { $ne: true },
     })
       .sort({ createdAt: -1 })
       .limit(limit);
- 
+
     const applicationIds = applications.map((a) => a.application_id);
- 
+
     const allFlows = await ApplicationFlow.find({
       application_id: { $in: applicationIds },
     }).sort({ createdAt: 1 });
- 
+
     const processedApplications = applications.map((app) => {
       let flow = allFlows.filter(
         (f) => f.application_id === app.application_id,
       );
- 
+
       flow = flow.filter(
         (item) =>
           item.action !== "REJECTED" || item.final_status === "REJECTED",
       );
- 
+
       const currentStep = flow.find((item) => item.final_status === "PENDING");
- 
+
       return {
         ...app.toObject(),
         flow,
         current_step: currentStep || null,
       };
     });
- 
+
     return res.status(200).json({
       success: true,
       count: processedApplications.length,
@@ -1133,8 +1152,8 @@ export const forwardApplicationDirect = async (req, res) => {
             forwarderRole?.role_id ?? application.forward_to_role_id,
           from_role_name:
             forwarderRole?.role_name ?? application.forward_to_role_name,
-          to_emp_id: nextApprover?.emp_id ?? null,
-          to_emp_name: nextApprover?.emp_name ?? "",
+          to_emp_id: null,
+          to_emp_name: null,
           to_role_id: toRole.role_id,
           to_role_name: toRole.role_name,
           to_dept_id: toRole.dept_ids?.[0] ?? null,
@@ -1149,10 +1168,24 @@ export const forwardApplicationDirect = async (req, res) => {
 
     await session.commitTransaction();
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: `Application forwarded to ${toRole.role_name} (Direct).`,
     });
+
+    // 🔔 Notification
+    if (nextApprover?.emp_id) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: nextApprover.emp_id,
+        role_id: toRole.role_id,
+        type: "RECEIVED",
+        reference_id: application.application_id,
+        reference_type: "Application",
+        title: "New Application Received",
+        message: `${application.subject} forwarded to you by ${forwarder?.emp_name ?? "Unknown"}`,
+      }).catch((err) => console.error("Notification send failed (forward direct app):", err));
+    }
   } catch (error) {
     await session.abortTransaction();
     console.error("FORWARD DIRECT ERROR:", error);
@@ -1346,8 +1379,8 @@ export const forwardApplicationChain = async (req, res) => {
           from_emp_name: forwarder?.emp_name ?? "",
           from_role_id: forwarderRole?.role_id ?? null,
           from_role_name: forwarderRole?.role_name ?? "",
-          to_emp_id: nextApprover?.emp_id ?? null,
-          to_emp_name: nextApprover?.emp_name ?? "",
+          to_emp_id: null,
+          to_emp_name: null,
           to_role_id: nextRole.role_id,
           to_role_name: nextRole.role_name,
           to_dept_id: targetDeptId,
@@ -1362,10 +1395,24 @@ export const forwardApplicationChain = async (req, res) => {
 
     await session.commitTransaction();
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: `Application forwarded to ${nextRole.role_name} (Chain).`,
     });
+
+    // 🔔 Notification
+    if (nextApprover?.emp_id) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: nextApprover.emp_id,
+        role_id: nextRole.role_id,
+        type: "RECEIVED",
+        reference_id: application.application_id,
+        reference_type: "Application",
+        title: "New Application Received",
+        message: `${application.subject} forwarded to you by ${forwarder?.emp_name ?? "Unknown"}`,
+      }).catch((err) => console.error("Notification send failed (forward chain app):", err));
+    }
   } catch (error) {
     await session.abortTransaction();
     console.error("FORWARD CHAIN ERROR:", error);
@@ -1444,6 +1491,18 @@ export const rejectApplication = async (req, res) => {
       message: "Application rejected successfully.",
       data: application,
     });
+
+    // 🔔 Notification
+    const io = req.app.get("io");
+    sendNotification(io, {
+      emp_id: application.emp_id,
+      role_id: application.submitted_by_role_id,
+      type: "REJECTED",
+      reference_id: application.application_id,
+      reference_type: "Application",
+      title: "Application Rejected",
+      message: `${application.subject} was rejected by ${rejecter?.emp_name ?? "Unknown"}`,
+    }).catch((err) => console.error("Notification send failed (reject app):", err));
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -1551,6 +1610,7 @@ export const raiseQuery = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Application not found." });
+
     if (
       currentRoleId &&
       Number(
@@ -1561,11 +1621,20 @@ export const raiseQuery = async (req, res) => {
         success: false,
         message: "Only the assigned role can raise a query.",
       });
+
     if (application.status !== "PENDING")
       return res.status(400).json({
         success: false,
         message: "Query can only be raised on a PENDING application.",
       });
+
+    // ✅ NEW: first level pe query raise nahi ho sakti
+    if (application.level <= 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Query cannot be raised at the first level.",
+      });
+    }
 
     const queryer = await Employee.findOne({ emp_id: Number(emp_id) });
 
@@ -1618,12 +1687,12 @@ export const raiseQuery = async (req, res) => {
 
     await ApplicationFlow.create({
       application_id: application.application_id,
-      from_emp_id: raiserEmpId ?? queryer?.emp_id ?? null, // ✅ fixed
-      from_emp_name: raiserEmpName ?? queryer?.emp_name ?? "", // ✅ fixed
-      from_role_id: raiserRoleId ?? null, // ✅ fixed
-      from_role_name: raiserRoleName ?? "", // ✅ fixed
-      to_emp_id: targetEmpId,
-      to_emp_name: targetEmpName,
+      from_emp_id: raiserEmpId ?? queryer?.emp_id ?? null,
+      from_emp_name: raiserEmpName ?? queryer?.emp_name ?? "",
+      from_role_id: raiserRoleId ?? null,
+      from_role_name: raiserRoleName ?? "",
+      to_emp_id: null,
+      to_emp_name: null,
       to_role_id: targetRoleId,
       to_role_name: targetRoleName,
       action: "QUERY",
@@ -1632,11 +1701,25 @@ export const raiseQuery = async (req, res) => {
       final_status: "QUERY_RAISED",
     });
 
-    return res.status(200).json({
+   return res.status(200).json({
       success: true,
       message: "Query raised successfully.",
       data: application,
     });
+
+    // 🔔 Notification
+    if (targetEmpId) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: targetEmpId,
+        role_id: targetRoleId,
+        type: "QUERY",
+        reference_id: application.application_id,
+        reference_type: "Application",
+        title: "Query Raised",
+        message: `${application.subject} — query raised by ${queryer?.emp_name ?? "Unknown"}`,
+      }).catch((err) => console.error("Notification send failed (raise query app):", err));
+    }
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -1647,63 +1730,6 @@ export const raiseQuery = async (req, res) => {
 //     PATCH /api/applications/:application_id/query-reply
 //     Body: { emp_id, remarks }
 // ─────────────────────────────────────────────────────────────────────────────
-// export const replyToQuery = async (req, res) => {
-//   try {
-//     const { emp_id, reply } = req.body;
-//     console.log("BODY RECEIVED:", req.body);
-//     if (!reply)
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Reply is required." });
-
-//     const application = await Application.findOne({
-//       application_id: req.params.application_id,
-//       is_deleted: false,
-//     });
-
-//     if (!application)
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Application not found." });
-//     if (application.emp_id !== Number(emp_id))
-//       return res.status(403).json({
-//         success: false,
-//         message: "Only the applicant can reply to a query.",
-//       });
-//     if (application.status !== "QUERY_RAISED")
-//       return res.status(400).json({
-//         success: false,
-//         message: "No query has been raised on this application.",
-//       });
-
-//     application.status = "PENDING";
-//     await application.save();
-
-//     await ApplicationFlow.create({
-//       application_id: application.application_id,
-//       from_emp_id: application.emp_id,
-//       from_emp_name: application.emp_name,
-//       from_role_id: application.submitted_by_role_id,
-//       from_role_name: application.submitted_by_role_name,
-//       to_emp_id: application.current_holder_emp_id,
-//       to_emp_name: application.current_holder_emp_name,
-//       to_role_id: application.forward_to_role_id,
-//       to_role_name: application.forward_to_role_name,
-//       action: "QUERY_REPLY",
-//       remark: reply,
-//       level: application.level,
-//       final_status: "QUERY_REPLIED",
-//     });
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Query reply submitted successfully.",
-//       data: application,
-//     });
-//   } catch (error) {
-//     return res.status(500).json({ success: false, message: error.message });
-//   }
-// };
 export const replyToQuery = async (req, res) => {
   try {
     const { application_id } = req.params;
@@ -1764,8 +1790,8 @@ export const replyToQuery = async (req, res) => {
       from_emp_name: employee?.emp_name ?? "Unknown User",
       from_role_id: userRoleId,
       from_role_name: role?.role_name ?? "Unknown Role",
-      to_emp_id: currentQueryStep.from_emp_id,
-      to_emp_name: currentQueryStep.from_emp_name ?? null,
+      to_emp_id: null,
+      to_emp_name: null,
       to_role_id: currentQueryStep.from_role_id,
       to_role_name: currentQueryStep.from_role_name ?? null,
       action: "QUERY_REPLY",
@@ -1798,11 +1824,27 @@ export const replyToQuery = async (req, res) => {
 
     application.status = "PENDING";
 
+    application.status = "PENDING";
+
     await application.save();
 
-    return res
+    res
       .status(200)
       .json({ success: true, message: "Reply sent successfully" });
+
+    // 🔔 Notification
+    if (currentQueryStep.from_emp_id) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: currentQueryStep.from_emp_id,
+        role_id: currentQueryStep.from_role_id,
+        type: "QUERY",
+        reference_id: application_id,
+        reference_type: "Application",
+        title: "Query Reply Received",
+        message: `${application.subject} — reply received from ${employee?.emp_name ?? "Unknown"}`,
+      }).catch((err) => console.error("Notification send failed (reply query app):", err));
+    }
   } catch (error) {
     console.error("Reply Query Error:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -2204,10 +2246,38 @@ export const getApplicationApprovalFlow = async (req, res) => {
       },
     ]);
 
+    const OPEN_STATUSES = ["PENDING", "QUERY_RAISED"];
+
+    const enrichedFlow = await Promise.all(
+      flow.map(async (entry) => {
+        if (
+          OPEN_STATUSES.includes(entry.final_status) &&
+          !entry.to_emp_id &&
+          entry.to_role_id
+        ) {
+          const holder = await Employee.findOne(
+            {
+              $or: [
+                { active_role_id: entry.to_role_id },
+                { role_ids: entry.to_role_id },
+              ],
+            },
+            "emp_id emp_name",
+          ).lean();
+          return {
+            ...entry,
+            to_emp_id: holder?.emp_id ?? null,
+            to_name: holder?.emp_name ?? "Unassigned",
+          };
+        }
+        return entry;
+      }),
+    );
+
     return res.status(200).json({
       success: true,
       application,
-      data: flow,
+      data: enrichedFlow,
     });
   } catch (error) {
     console.error("getApplicationApprovalFlow error:", error.message);
@@ -2292,7 +2362,6 @@ export const getQueriesByApplicationId = async (req, res) => {
   }
 };
 
-
 export const getApprovedApplicationsByRole = async (req, res) => {
   try {
     const roleId = req.user?.active_role_id || req.user?.role_id;
@@ -2305,34 +2374,11 @@ export const getApprovedApplicationsByRole = async (req, res) => {
     }
 
     const latestFlows = await ApplicationFlow.aggregate([
-      {
-        $match: {
-          from_role_id: Number(roleId),
-        },
-      },
-      {
-        $sort: {
-          createdAt: -1,
-        },
-      },
-      {
-        $group: {
-          _id: "$application_id",
-          latest: {
-            $first: "$$ROOT",
-          },
-        },
-      },
-      {
-        $match: {
-          "latest.action": "APPROVED",
-        },
-      },
-      {
-        $replaceRoot: {
-          newRoot: "$latest",
-        },
-      },
+      { $match: { from_role_id: Number(roleId) } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: "$application_id", latest: { $first: "$$ROOT" } } },
+      { $match: { "latest.action": "APPROVED" } },
+      { $replaceRoot: { newRoot: "$latest" } },
     ]);
 
     if (!latestFlows.length) {
@@ -2346,41 +2392,35 @@ export const getApprovedApplicationsByRole = async (req, res) => {
 
     const applicationIds = latestFlows.map((f) => f.application_id);
 
-    const applications = await Application.find(
-      {
-        application_id: { $in: applicationIds },
-        is_deleted: { $ne: true },
-      },
-      {
-        application_id: 1,
-        application_name: 1, // Change if your schema uses another field
-        status: 1,
-        lifecycle_status: 1,
-      }
-    ).lean();
+    // ✅ Poora application document fetch karo — select() hata diya
+    const applications = await Application.find({
+      application_id: { $in: applicationIds },
+      is_deleted: { $ne: true },
+    }).lean();
 
     const applicationMap = {};
-
     applications.forEach((app) => {
       applicationMap[app.application_id] = app;
     });
 
-    const formatted = latestFlows.map((f) => ({
-      application_id: f.application_id,
-      application_name:
-        applicationMap[f.application_id]?.application_name ||
-        "No Application Name",
-      status: applicationMap[f.application_id]?.status || null,
-      lifecycle_status:
-        applicationMap[f.application_id]?.lifecycle_status || null,
-      approved_by_emp_id: f.from_emp_id,
-      approved_by_role_id: f.from_role_id,
-      approved_by_role_name: f.from_role_name || null,
-      remarks: f.remark,
-      level: f.level,
-      approved_at: f.createdAt,
-      action: f.action,
-    }));
+    // ✅ Poora app object spread karo, phir approval-specific fields overlay karo
+    const formatted = latestFlows
+      .map((f) => {
+        const app = applicationMap[f.application_id];
+        if (!app) return null; // deleted ya missing application skip karo
+
+        return {
+          ...app, // ✅ subject, createdAt, attachments, mode, sab kuch aa jayega
+          approved_by_emp_id: f.from_emp_id,
+          approved_by_role_id: f.from_role_id,
+          approved_by_role_name: f.from_role_name || null,
+          remarks: f.remark,
+          level: f.level,
+          approved_at: f.createdAt,
+          action: f.action,
+        };
+      })
+      .filter(Boolean);
 
     return res.status(200).json({
       success: true,
@@ -2397,6 +2437,133 @@ export const getApprovedApplicationsByRole = async (req, res) => {
   }
 };
 
+// export const forwardExecutionApplication = async (req, res) => {
+//   try {
+//     const { applicationId } = req.params;
+//     const { roleId, comment } = req.body;
+//     const user = req.user;
+//     const currentRoleId = user.active_role_id || user.role_id;
+
+//     if (!currentRoleId)
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "User role missing" });
+//     if (!roleId)
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Please select role" });
+
+//     const application = await Application.findOne({
+//       application_id: applicationId,
+//     });
+//     if (!application)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Application not found" });
+
+//     if (!["APPROVED", "IN_EXECUTION"].includes(application.status)) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Application is not in valid state" });
+//     }
+
+//     const lastApproval = await ApplicationFlow.findOne({
+//       application_id: applicationId,
+//       action: "APPROVED",
+//     }).sort({ createdAt: -1 });
+//     if (!lastApproval)
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Application not approved yet" });
+
+//     if (Number(lastApproval.from_role_id) !== Number(currentRoleId)) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Only approving role can start execution",
+//       });
+//     }
+
+//     if (Number(currentRoleId) === Number(roleId)) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Cannot forward to same role" });
+//     }
+
+//     const [currentRole, executionRole, employee] = await Promise.all([
+//       Role.findOne({ role_id: currentRoleId }),
+//       Role.findOne({ role_id: roleId }),
+//       Employee.findOne({ emp_id: user.emp_id }),
+//     ]);
+//     if (!executionRole)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Selected role not found" });
+
+//     const executionEmployee = await Employee.findOne({
+//       $or: [{ active_role_id: Number(roleId) }, { role_ids: Number(roleId) }],
+//     });
+
+//     // ✅ NEW CHECK — role kisi bhi employee ko assign hai ya nahi
+//     if (!executionEmployee) {
+//       const roleEverAssigned = await Employee.exists({
+//         $or: [{ active_role_id: Number(roleId) }, { role_ids: Number(roleId) }],
+//       });
+//       if (!roleEverAssigned) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Role "${executionRole.role_name}" is not currently assigned to any employee. Cannot forward.`,
+//         });
+//       }
+//     }
+
+//     application.status = "IN_EXECUTION";
+//     application.lifecycle_status = "OPEN";
+//     application.forward_to_role_id = Number(roleId);
+//     application.forward_to_emp_id = executionEmployee?.emp_id || null;
+//     application.forward_to_dept_id = null;
+//     application.current_holder_emp_id = executionEmployee?.emp_id || null;
+//     application.updated_by = user.emp_id;
+//     await application.save();
+
+//     await ApplicationFlow.create({
+//       application_id: applicationId,
+//       from_emp_id: user.emp_id,
+//       from_emp_name: employee?.emp_name || "Unknown",
+//       from_role_id: currentRoleId,
+//       from_role_name: currentRole?.role_name || "Unknown",
+//       to_emp_id: null,
+//       to_emp_name: null,
+//       to_role_id: Number(roleId),
+//       to_role_name: executionRole?.role_name || "Execution Role",
+//       action: "EXECUTION_STARTED",
+//       remark: comment || null,
+//       level: currentRole?.power_level || application.level || 1,
+//       final_status: ACTION_STATUS.EXECUTION_STARTED,
+//     });
+
+//     res.json({
+//       success: true,
+//       message: "Execution started successfully",
+//     });
+
+//     // 🔔 Notification
+//     if (executionEmployee?.emp_id) {
+//       const io = req.app.get("io");
+//       sendNotification(io, {
+//         emp_id: executionEmployee.emp_id,
+//         role_id: Number(roleId),
+//         type: "FOR_CLOSURE",
+//         reference_id: applicationId,
+//         reference_type: "Application",
+//         title: "Application Sent for Execution",
+//         message: `${application.subject} sent to you for execution by ${employee?.emp_name ?? "Unknown"}`,
+//       }).catch((err) => console.error("Notification send failed (execution app):", err));
+//     }
+//   } catch (error) {
+//     console.error("Application Execution Error:", error);
+//     return res.status(500).json({ success: false, message: error.message });
+//   }
+// };/
 
 export const forwardExecutionApplication = async (req, res) => {
   try {
@@ -2406,16 +2573,26 @@ export const forwardExecutionApplication = async (req, res) => {
     const currentRoleId = user.active_role_id || user.role_id;
 
     if (!currentRoleId)
-      return res.status(400).json({ success: false, message: "User role missing" });
+      return res
+        .status(400)
+        .json({ success: false, message: "User role missing" });
     if (!roleId)
-      return res.status(400).json({ success: false, message: "Please select role" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Please select role" });
 
-    const application = await Application.findOne({ application_id: applicationId });
+    const application = await Application.findOne({
+      application_id: applicationId,
+    });
     if (!application)
-      return res.status(404).json({ success: false, message: "Application not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Application not found" });
 
     if (!["APPROVED", "IN_EXECUTION"].includes(application.status)) {
-      return res.status(400).json({ success: false, message: "Application is not in valid state" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Application is not in valid state" });
     }
 
     const lastApproval = await ApplicationFlow.findOne({
@@ -2423,7 +2600,9 @@ export const forwardExecutionApplication = async (req, res) => {
       action: "APPROVED",
     }).sort({ createdAt: -1 });
     if (!lastApproval)
-      return res.status(400).json({ success: false, message: "Application not approved yet" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Application not approved yet" });
 
     if (Number(lastApproval.from_role_id) !== Number(currentRoleId)) {
       return res.status(403).json({
@@ -2433,7 +2612,9 @@ export const forwardExecutionApplication = async (req, res) => {
     }
 
     if (Number(currentRoleId) === Number(roleId)) {
-      return res.status(400).json({ success: false, message: "Cannot forward to same role" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Cannot forward to same role" });
     }
 
     const [currentRole, executionRole, employee] = await Promise.all([
@@ -2442,7 +2623,20 @@ export const forwardExecutionApplication = async (req, res) => {
       Employee.findOne({ emp_id: user.emp_id }),
     ]);
     if (!executionRole)
-      return res.status(404).json({ success: false, message: "Selected role not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Selected role not found" });
+
+    // ✅ Department check — sirf tab lagega jab role kisi specific dept se bound hai
+    if (executionRole.dept_ids && executionRole.dept_ids.length > 0) {
+      if (!executionRole.dept_ids.includes(Number(application.dept_id))) {
+        return res.status(403).json({
+          success: false,
+          message: `Cannot forward outside department. Role "${executionRole.role_name}" does not belong to this department.`,
+        });
+      }
+    }
+    // else: role.dept_ids empty/missing → global role, no restriction
 
     const executionEmployee = await Employee.findOne({
       $or: [{ active_role_id: Number(roleId) }, { role_ids: Number(roleId) }],
@@ -2465,7 +2659,7 @@ export const forwardExecutionApplication = async (req, res) => {
     application.lifecycle_status = "OPEN";
     application.forward_to_role_id = Number(roleId);
     application.forward_to_emp_id = executionEmployee?.emp_id || null;
-    application.forward_to_dept_id = null;
+    application.forward_to_dept_id = application.dept_id;
     application.current_holder_emp_id = executionEmployee?.emp_id || null;
     application.updated_by = user.emp_id;
     await application.save();
@@ -2476,8 +2670,8 @@ export const forwardExecutionApplication = async (req, res) => {
       from_emp_name: employee?.emp_name || "Unknown",
       from_role_id: currentRoleId,
       from_role_name: currentRole?.role_name || "Unknown",
-      to_emp_id: executionEmployee?.emp_id || null,
-      to_emp_name: executionEmployee?.emp_name || null,
+      to_emp_id: null,
+      to_emp_name: null,
       to_role_id: Number(roleId),
       to_role_name: executionRole?.role_name || "Execution Role",
       action: "EXECUTION_STARTED",
@@ -2486,10 +2680,24 @@ export const forwardExecutionApplication = async (req, res) => {
       final_status: ACTION_STATUS.EXECUTION_STARTED,
     });
 
-    return res.json({
+    res.json({
       success: true,
       message: "Execution started successfully",
     });
+
+    // 🔔 Notification
+    if (executionEmployee?.emp_id) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: executionEmployee.emp_id,
+        role_id: Number(roleId),
+        type: "FOR_CLOSURE",
+        reference_id: applicationId,
+        reference_type: "Application",
+        title: "Application Sent for Execution",
+        message: `${application.subject} sent to you for execution by ${employee?.emp_name ?? "Unknown"}`,
+      }).catch((err) => console.error("Notification send failed (execution app):", err));
+    }
   } catch (error) {
     console.error("Application Execution Error:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -2506,7 +2714,9 @@ export const completeExecutionApplication = async (req, res) => {
     const user = req.user;
     const userRoleId = Number(user.active_role_id || user.role_id);
 
-    const application = await Application.findOne({ application_id: applicationId });
+    const application = await Application.findOne({
+      application_id: applicationId,
+    });
     if (!application)
       return res
         .status(404)
@@ -2533,14 +2743,12 @@ export const completeExecutionApplication = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Execution step not found" });
 
-    if (Number(executionStep.to_emp_id) !== Number(user.emp_id)) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Only assigned execution user can close this application",
-        });
-    }
+    // if (Number(executionStep.to_emp_id) !== Number(user.emp_id)) {
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: "Only assigned execution user can close this application",
+    //   });
+    // }
     if (String(application.forward_to_role_id) !== String(userRoleId)) {
       return res
         .status(403)
@@ -2561,7 +2769,11 @@ export const completeExecutionApplication = async (req, res) => {
     await application.save();
 
     await ApplicationFlow.updateOne(
-      { application_id: applicationId, action: "EXECUTION_STARTED", final_status: "PENDING" },
+      {
+        application_id: applicationId,
+        action: "EXECUTION_STARTED",
+        final_status: "PENDING",
+      },
       { $set: { final_status: "COMPLETED" } },
     );
 
@@ -2575,7 +2787,7 @@ export const completeExecutionApplication = async (req, res) => {
       to_role_id: null,
       to_role_name: null,
       action: "CLOSED",
-      remark: remark || "", 
+      remark: remark || "",
       level: role?.power_level || application.level || 1,
       final_status: ACTION_STATUS.CLOSED, // 'COMPLETED'
     });
@@ -2590,18 +2802,15 @@ export const completeExecutionApplication = async (req, res) => {
     //   remark,
     // });
 
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "Application execution completed successfully",
-      });
+    return res.status(200).json({
+      success: true,
+      message: "Application execution completed successfully",
+    });
   } catch (error) {
     console.error("Complete Application Execution Error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 export const getExecutionApplications = async (req, res) => {
   try {
@@ -2609,7 +2818,9 @@ export const getExecutionApplications = async (req, res) => {
     console.log("🔍 Execution fetch — roleId:", roleId, typeof roleId);
 
     if (!roleId) {
-      return res.status(400).json({ success: false, message: "roleId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "roleId is required" });
     }
 
     roleId = Number(roleId);
@@ -2623,7 +2834,9 @@ export const getExecutionApplications = async (req, res) => {
     };
     console.log("🔍 Query:", query);
 
-    const applications = await Application.find(query).sort({ updatedAt: -1 }).lean();
+    const applications = await Application.find(query)
+      .sort({ updatedAt: -1 })
+      .lean();
     console.log("🔍 Found count:", applications.length);
 
     if (!applications.length) {
@@ -2677,5 +2890,32 @@ export const getExecutionApplications = async (req, res) => {
       success: false,
       message: "Failed to fetch execution applications",
     });
+  }
+};
+
+export const locateApplication = async (req, res) => {
+  try {
+    const { application_id } = req.params;
+    const empId = req.user.emp_id;
+    const activeRoleId = req.user.active_role_id;
+
+    const application = await Application.findOne({ application_id }).lean();
+    if (!application) {
+      return res.json({ success: true, location: "not_found" });
+    }
+
+    const isCurrentHolder =
+      application.status === "PENDING" &&
+      application.current_holder_emp_id === empId &&
+      String(application.current_holder_role_id) === String(activeRoleId);
+
+    if (isCurrentHolder) {
+      return res.json({ success: true, location: "received", application_id });
+    }
+
+    return res.json({ success: true, location: "history", application_id });
+  } catch (err) {
+    console.error("locateApplication error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };

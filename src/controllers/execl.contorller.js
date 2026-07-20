@@ -1,5 +1,6 @@
 import xlsx from "xlsx";
 import bcrypt from "bcryptjs";
+import dns from "dns/promises";
 import Employee from "../models/user/employee.model.js";
 import Department from "../models/office/department.model.js";
 import { generateEmpId } from "../utility/generateEmpId.js";
@@ -7,8 +8,53 @@ import { sendCredentialsNotification } from "../controllers/userController.js";
 import { generateDefaultPassword, validatePasswordStrength } from "../controllers/userController.js";
 
 const nameRegex   = /^[a-zA-Z\s]+$/;
-const emailRegex  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRegex  = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const mobileRegex = /^\d{10}$/;
+
+// ── Whitelist of allowed email domains ──
+// Sirf sabse zyada use hone wale mainstream providers allowed hain.
+// Requirement badalne par is Set ko update kar sakte hain.
+const ALLOWED_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "yahoo.com",
+  "outlook.com",
+  "hotmail.com",
+  "icloud.com",
+]);
+
+// ── In-memory cache so we don't re-run DNS lookups for the same domain
+// repeatedly within a single bulk-upload request ──
+const domainCache = new Map();
+
+const getDomain = (email) => email.split("@")[1]?.toLowerCase();
+
+// ── Checks whether a domain can actually receive mail (has MX records),
+// falling back to an A/AAAA record check for domains that route mail
+// directly to their own IP (rare, but valid per RFC 5321) ──
+// NOTE: Ab whitelist check ke baad hi ye call hota hai, isliye normally
+// ye sirf whitelisted domains ke liye chalega (jo waise bhi deliverable hote hain).
+// Agar aapko is extra DNS check ki zaroorat nahi (whitelist hi kaafi hai),
+// to isse skip kar sakte hain — neeche processRow mein comment dekhein.
+const isDomainDeliverable = async (domain) => {
+  if (domainCache.has(domain)) return domainCache.get(domain);
+
+  let result = false;
+  try {
+    const mx = await dns.resolveMx(domain);
+    result = Array.isArray(mx) && mx.length > 0;
+  } catch {
+    // No MX record — check for A/AAAA as a fallback
+    try {
+      await dns.lookup(domain);
+      result = true;
+    } catch {
+      result = false;
+    }
+  }
+
+  domainCache.set(domain, result);
+  return result;
+};
 
 // ── Ek row ko process karne ka kaam ──
 const processRow = async (row, deptMap, dbEmails, dbMobiles, seenEmails, seenMobiles) => {
@@ -63,6 +109,24 @@ const processRow = async (row, deptMap, dbEmails, dbMobiles, seenEmails, seenMob
       throw new Error("Invalid email format");
     if (!mobileRegex.test(mobile_number))
       throw new Error("Mobile must be exactly 10 digits");
+
+    const domain = getDomain(email);
+    if (!domain) throw new Error("Invalid email format");
+
+    // ── STEP 1: Whitelist check — sirf allowed domains hi accepted hain ──
+    if (!ALLOWED_EMAIL_DOMAINS.has(domain)) {
+      throw new Error(
+        `Email domain "${domain}" is not allowed. Allowed domains: ${[...ALLOWED_EMAIL_DOMAINS].join(", ")}`
+      );
+    }
+
+    // ── STEP 2 (optional): Confirm domain can actually receive mail (MX/A check).
+    // Whitelisted domains normally hamesha deliverable hote hain, isliye ye check
+    // zyadatar redundant hai — agar chahen to poori tarah hata sakte hain speed ke liye.
+    const deliverable = await isDomainDeliverable(domain);
+    if (!deliverable) {
+      throw new Error(`Email domain does not exist or cannot receive mail: ${domain}`);
+    }
 
     const dept = deptMap.get(dept_name);
     if (!dept) throw new Error(`Department not found: ${dept_name}`);
