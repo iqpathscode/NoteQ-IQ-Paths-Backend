@@ -3,10 +3,6 @@ import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 
 /**
  * checkQueryBlock
- * ───────────────
- * Agar kisi notesheet par QUERY_RAISED status hai
- * toh QUERY_REPLY ke alawa koi bhi action block karo.
- *
  * @param {string}  noteId
  * @param {object}  session  - optional mongoose session (transaction ke liye)
  * @returns {{ blocked: boolean, message?: string }}
@@ -25,7 +21,7 @@ export const checkQueryBlock = async (noteId, session = null) => {
   if (openQuery) {
     return {
       blocked: true,
-      message: 'Is notesheet par ek query pending hai. Pehle query ka reply aane do.',
+      message: 'A query is currently pending on this notesheet. Please wait for the query response before proceeding..',
     };
   }
 
@@ -53,7 +49,7 @@ export const canRaiseQuery = async (noteId) => {
   if (openQuery) {
     return {
       allowed: false,
-      message: 'A query is already pending. You can send a new query only after the reply is received.',
+      message: "A query is currently pending on this notesheet. Please wait for the query response before proceeding.",
     };
   }
 

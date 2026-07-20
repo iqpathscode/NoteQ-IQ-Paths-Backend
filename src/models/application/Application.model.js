@@ -45,11 +45,11 @@ const applicationSchema = new mongoose.Schema(
     level: { type: Number, default: 0 },
 
     status: {
-      type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED", "IN_EXECUTION", "CLOSED"],
-      default: "PENDING",
-      index: true,
-    },
+  type: String,
+  enum: ["PENDING", "QUERY_RAISED", "APPROVED", "REJECTED", "IN_EXECUTION", "CLOSED"],
+  default: "PENDING",
+  index: true,
+},
 
     lifecycle_status: {
       type: String,

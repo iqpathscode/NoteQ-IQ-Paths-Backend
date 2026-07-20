@@ -8,6 +8,8 @@ import appConfigRoute from "./src/routes/appConfigRoute.js";
 // import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
 import applicationRoutes from "./src/routes/application.routes.js";
 import queryRoutes from "./src/routes/query.routes.js";
+import notificationRoutes from './src/routes/notificationRoute.js'; 
+import { authenticate } from "./src/middlewares/auth.middleware.js";
 
 const app = express();
 
@@ -43,6 +45,7 @@ app.use("/api", uploadRoutes);
 app.use("/api/admin/app-config", appConfigRoute);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/query", queryRoutes);
+app.use('/api/notifications', authenticate, notificationRoutes);
 app.set("trust proxy", 1);
 
 app.get("/test", (req, res) => {

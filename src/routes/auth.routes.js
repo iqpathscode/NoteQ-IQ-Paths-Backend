@@ -103,6 +103,7 @@ import {
   forwardNotesheetDirect,
   getProcessedNotesheets,
   getApprovedNotesheetsByRole,
+  locateNotesheet,
 } from "../controllers/notesheetAction.controller.js";
 
 // Upload
@@ -201,6 +202,7 @@ router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
 router.get("/departments/by-role", authenticate, getDepartmentsByRole);
 router.get("/dashboard/combined", authenticate, getCombinedDashboardData);
 
+router.get("/notesheets/:noteId/locate", authenticate, locateNotesheet);
 router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
 router.get("/notesheets/:noteId", authenticate, getNotesheetById); 
 router.delete("/notesheet/:note_id", authenticate, deleteNotesheet);

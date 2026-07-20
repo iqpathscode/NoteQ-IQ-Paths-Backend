@@ -24,6 +24,10 @@ const STATUS_STYLES = {
     label: "Forwarded",
     statusColor: "text-blue-700 bg-blue-50 border border-blue-200",
   },
+  CLOSED: {
+    label: "Closed",
+    statusColor: "text-slate-700 bg-slate-100 border border-slate-200",
+  },
 };
 
 const getTimeAgo = (value) => {
@@ -51,12 +55,15 @@ const getStatusInfo = (status) => {
   };
 };
 
-const buildSummary = (items, type) => {
+// Same logic for BOTH notesheet and application now — no more type-specific overrides.
+// forwarded = IN_EXECUTION + QUERY_RAISED, closed = CLOSED (its own bucket).
+const buildSummary = (items) => {
   const summary = {
     approved: 0,
     pending: 0,
     forwarded: 0,
     rejected: 0,
+    closed: 0,
     total: items.length,
   };
 
@@ -66,18 +73,15 @@ const buildSummary = (items, type) => {
     if (status === "APPROVED") summary.approved += 1;
     else if (status === "PENDING") summary.pending += 1;
     else if (status === "IN_EXECUTION") summary.forwarded += 1;
-    else if (status === "REJECTED") summary.rejected += 1;
     else if (status === "QUERY_RAISED") summary.forwarded += 1;
+    else if (status === "REJECTED") summary.rejected += 1;
+    else if (status === "CLOSED") summary.closed += 1;
   });
-
-  if (type === "application") {
-    summary.forwarded = items.filter((item) => item.status === "QUERY_RAISED").length;
-  }
 
   return summary;
 };
 
-const buildDepartmentStats = (items, departmentsById, departmentNamesById, type) => {
+const buildDepartmentStats = (items, departmentNamesById) => {
   const statsByDepartment = new Map();
 
   const ensureEntry = (name) => {
@@ -88,6 +92,7 @@ const buildDepartmentStats = (items, departmentsById, departmentNamesById, type)
         pending: 0,
         forwarded: 0,
         rejected: 0,
+        closed: 0,
         total: 0,
       });
     }
@@ -105,28 +110,39 @@ const buildDepartmentStats = (items, departmentsById, departmentNamesById, type)
     if (item.status === "APPROVED") entry.approved += 1;
     else if (item.status === "PENDING") entry.pending += 1;
     else if (item.status === "IN_EXECUTION") entry.forwarded += 1;
-    else if (item.status === "REJECTED") entry.rejected += 1;
     else if (item.status === "QUERY_RAISED") entry.forwarded += 1;
+    else if (item.status === "REJECTED") entry.rejected += 1;
+    else if (item.status === "CLOSED") entry.closed += 1;
   });
-
-  if (type === "application") {
-    statsByDepartment.forEach((entry) => {
-      entry.forwarded = items.filter((item) => item.dept_id && (departmentNamesById.get(item.dept_id) || `Department ${item.dept_id}`) === entry.name && item.status === "QUERY_RAISED").length;
-    });
-  }
 
   const allEntry = ensureEntry("All");
   allEntry.approved = items.filter((item) => item.status === "APPROVED").length;
   allEntry.pending = items.filter((item) => item.status === "PENDING").length;
   allEntry.forwarded = items.filter((item) => item.status === "IN_EXECUTION" || item.status === "QUERY_RAISED").length;
   allEntry.rejected = items.filter((item) => item.status === "REJECTED").length;
+  allEntry.closed = items.filter((item) => item.status === "CLOSED").length;
   allEntry.total = items.length;
 
   return Array.from(statsByDepartment.values()).filter((entry) => entry.name !== "All").concat([allEntry]);
 };
 
 const buildRecentActivities = (items, employeesById, departmentsById, type) => {
-  return items.map((item) => {
+  const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+  const cutoff = Date.now() - TWELVE_HOURS_MS;
+
+  const recentItems = items.filter((item) => {
+    const dateValue = item.createdAt || item.received_at || item.updatedAt;
+    if (!dateValue) return false;
+    return new Date(dateValue).getTime() >= cutoff;
+  });
+
+  const sortedItems = [...recentItems].sort((a, b) => {
+    const dateA = new Date(a.createdAt || a.received_at || a.updatedAt || 0).getTime();
+    const dateB = new Date(b.createdAt || b.received_at || b.updatedAt || 0).getTime();
+    return dateB - dateA; // newest first
+  });
+
+  return sortedItems.map((item) => {
     const empId = item.emp_id || item.created_by_emp_id;
     const userName = employeesById.get(empId) || "Unknown User";
     const deptName = departmentsById.get(item.dept_id) || "Unknown Department";
@@ -157,12 +173,12 @@ export const getCombinedDashboardData = async (req, res) => {
     const departmentsById = new Map(departments.map((dept) => [dept.dept_id, dept.dept_name]));
     const employeesById = new Map(employees.map((employee) => [employee.emp_id, employee.emp_name]));
 
-    const notesheetSummary = buildSummary(notesheets, "notesheet");
-    const notesheetDepartmentStats = buildDepartmentStats(notesheets, departmentsById, departmentsById, "notesheet");
+    const notesheetSummary = buildSummary(notesheets);
+    const notesheetDepartmentStats = buildDepartmentStats(notesheets, departmentsById);
     const notesheetActivities = buildRecentActivities(notesheets, employeesById, departmentsById, "notesheet");
 
-    const applicationSummary = buildSummary(applications, "application");
-    const applicationDepartmentStats = buildDepartmentStats(applications, departmentsById, departmentsById, "application");
+    const applicationSummary = buildSummary(applications);
+    const applicationDepartmentStats = buildDepartmentStats(applications, departmentsById);
     const applicationActivities = buildRecentActivities(applications, employeesById, departmentsById, "application");
 
     return res.status(200).json({
