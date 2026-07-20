@@ -368,7 +368,7 @@ export const getApprovalFlow = async (req, res) => {
       });
     }
 
-    const flow = await NotesheetFlow.aggregate([
+  const flow = await NotesheetFlow.aggregate([
       { $match: { note_id: noteId } },
       { $sort: { createdAt: 1 } },
 
@@ -477,10 +477,32 @@ export const getApprovalFlow = async (req, res) => {
       },
     ]);
 
+    // 🔧 NEW: jo step abhi bhi open hai (koi action nahi hua), uska "to" naam
+    // role se live resolve karo — kyunki to_emp_id/to_name us waqt intentionally
+    // freeze nahi kiya gaya tha (role transfer se stale na ho isliye)
+    const OPEN_STATUSES = ["PENDING", "QUERY_RAISED"];
+
+    const enrichedFlow = await Promise.all(
+      flow.map(async (entry) => {
+        if (OPEN_STATUSES.includes(entry.final_status) && !entry.to_emp_id && entry.to_role_id) {
+          const holder = await Employee.findOne(
+            { $or: [{ active_role_id: entry.to_role_id }, { role_ids: entry.to_role_id }] },
+            "emp_id emp_name"
+          ).lean();
+          return {
+            ...entry,
+            to_emp_id: holder?.emp_id ?? null,
+            to_name: holder?.emp_name ?? "Unassigned",
+          };
+        }
+        return entry;
+      })
+    );
+
     return res.status(200).json({
       success: true,
       notesheet,
-      data: flow,
+      data: enrichedFlow, // ⬅️ "flow" ki jagah ab "enrichedFlow" bhejo
     });
   } catch (error) {
     console.error("getApprovalFlow error:", error.message);

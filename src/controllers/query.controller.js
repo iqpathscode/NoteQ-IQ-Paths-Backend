@@ -110,7 +110,7 @@ export const raiseQuery = async (req, res) => {
       });
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,

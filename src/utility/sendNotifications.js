@@ -1,41 +1,30 @@
-import  Role  from "../models/userPowers/role.model.js";
+import Notification from "../models/notification/notification.js";
 
-export const sendNotification = async ({
-  user_id,
-  role_id,
-  type,
-  title,
-  message,
-  notesheet_id,
-}) => {
-  try {
-    //  strict validation
-    if (!user_id || !role_id || !type || !title || !message || !notesheet_id) {
-      console.log(" Missing notification fields");
-      return;
-    }
+const MAX_NOTIFICATIONS_PER_USER = 5; // yahan se count control hoga (5/7/10)
 
-    // role fetch
-    const roleData = await Role.findOne({ role_id });
+export async function sendNotification(io, { emp_id, role_id, type, reference_id, reference_type, title, message }) {
+  const notif = await Notification.create({
+    emp_id,
+    role_id,
+    type,
+    reference_id,
+    reference_type,
+    title,
+    message,
+  });
 
-    if (!roleData) {
-      console.log(`❌ Role not found for role_id: ${role_id}`);
-      return;
-    }
+  // ✅ Purani notifications trim karo — sirf latest N rakho
+  const allForUser = await Notification.find({ emp_id })
+    .sort({ createdAt: -1 })
+    .select("_id");
 
-    //  create notification
-    await Notification.create({
-      user_id,
-      role_id,
-      role: roleData.role_name, //  always correct
-      type,
-      title,
-      message,
-      notesheet_id,
-    });
-
-    console.log(` Notification sent to user: ${user_id}`);
-  } catch (error) {
-    console.error(" Notification Error:", error.message);
+  if (allForUser.length > MAX_NOTIFICATIONS_PER_USER) {
+    const idsToDelete = allForUser
+      .slice(MAX_NOTIFICATIONS_PER_USER)
+      .map((n) => n._id);
+    await Notification.deleteMany({ _id: { $in: idsToDelete } });
   }
-};
+
+  io.to(`emp_${emp_id}`).emit("new_notification", notif);
+  return notif;
+}

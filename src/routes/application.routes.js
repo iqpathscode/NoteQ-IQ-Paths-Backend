@@ -25,7 +25,8 @@ import {
   getApprovedApplicationsByRole,
   completeExecutionApplication,
   forwardExecutionApplication,
-  getExecutionApplications
+  getExecutionApplications,
+  locateApplication
 } from "../controllers/application.controller.js";
 import { isAdmin } from "../middlewares/auth.middleware.js";
 
@@ -48,6 +49,7 @@ router.get("/execution", authenticate, getExecutionApplications);
 router.get("/employee/:empId/applications/summary", authenticate, getEmployeeApplicationSummary);
 router.get("/recent", authenticate, getRecentApplications);
 router.get("/:application_id/approval-flow", authenticate, getApplicationApprovalFlow);
+router.get("/:application_id/locate", authenticate, locateApplication);
 
 // ── Single Application — KEEP LAST ───────────────────────────────────────────
 router.get("/:application_id", authenticate, getApplicationById);
