@@ -8,6 +8,7 @@ import NotesheetFlow from "../models/notes/notesheetFlow.model.js";
 import School from "../models/office/school.model.js";
 import Admin from "../models/user/admin.model.js";
 import Power from "../models/userPowers/power.model.js";
+import Application from "../models/application/Application.model.js";
 
 const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CLOSED", "IN_EXECUTION"];
 

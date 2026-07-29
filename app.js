@@ -10,6 +10,7 @@ import applicationRoutes from "./src/routes/application.routes.js";
 import queryRoutes from "./src/routes/query.routes.js";
 import notificationRoutes from './src/routes/notificationRoute.js'; 
 import { authenticate } from "./src/middlewares/auth.middleware.js";
+import announcementRoutes from "./src/routes/announcementRoutes.js"
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use("/api/admin/app-config", appConfigRoute);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/query", queryRoutes);
 app.use('/api/notifications', authenticate, notificationRoutes);
+app.use("/api/announcements", announcementRoutes);
 app.set("trust proxy", 1);
 
 app.get("/test", (req, res) => {
