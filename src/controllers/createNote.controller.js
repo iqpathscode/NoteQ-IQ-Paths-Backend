@@ -1271,7 +1271,7 @@ export const forwardChainOnly = async (req, res) => {
       }
 
       // Power level check — neeche nahi ja sakte
-      if (nextPower.power_level <= currentPower.power_level) {
+      if (nextPower.power_level < currentPower.power_level) {
         await session.abortTransaction();
         return res.status(400).json({
           success: false,
@@ -1555,6 +1555,105 @@ export const forwardExecutionNotesheet = async (req, res) => {
 // ============================================================
 // COMPLETE EXECUTION (CLOSED)
 // ============================================================
+// export const completeExecutionNotesheet = async (req, res) => {
+//   try {
+//     const { noteId } = req.params;
+//     const { remark } = req.body;
+//     const user = req.user;
+//     const userRoleId = Number(user.active_role_id || user.role_id);
+
+//     const notesheet = await Notesheet.findOne({ note_id: noteId });
+//     if (!notesheet)
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Notesheet not found" });
+
+//     if (notesheet.status !== "IN_EXECUTION") {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Notesheet is not in execution" });
+//     }
+//     if (notesheet.lifecycle_status !== "OPEN") {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Notesheet already closed" });
+//     }
+
+//     const executionStep = await NotesheetFlow.findOne({
+//       note_id: noteId,
+//       action: "EXECUTION_STARTED",
+//       final_status: "PENDING",
+//     });
+//     if (!executionStep)
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Execution step not found" });
+
+//     // if (Number(executionStep.to_emp_id) !== Number(user.emp_id)) {
+//     //   return res.status(403).json({
+//     //     success: false,
+//     //     message: "Only assigned execution user can close this notesheet",
+//     //   });
+//     // }
+//     if (String(notesheet.forward_to_role_id) !== String(userRoleId)) {
+//       return res
+//         .status(403)
+//         .json({ success: false, message: "Not authorized" });
+//     }
+
+//     const [role, employee] = await Promise.all([
+//       Role.findOne({ role_id: userRoleId }),
+//       Employee.findOne({ emp_id: user.emp_id }),
+//     ]);
+
+//     notesheet.status = "CLOSED";
+//     notesheet.lifecycle_status = "CLOSED";
+//     notesheet.forward_to_role_id = null;
+//     notesheet.forward_to_emp_id = null;
+//     notesheet.forward_to_dept_id = null;
+//     notesheet.updated_by = user.emp_id;
+//     await notesheet.save();
+
+//     await NotesheetFlow.updateOne(
+//       { note_id: noteId, action: "EXECUTION_STARTED", final_status: "PENDING" },
+//       { $set: { final_status: "COMPLETED" } },
+//     );
+
+//     await NotesheetFlow.create({
+//       note_id: noteId,
+//       from_emp_id: user.emp_id,
+//       from_emp_name: employee?.emp_name || "Unknown",
+//       from_role_id: userRoleId,
+//       from_role_name: role?.role_name || "Unknown",
+//       to_emp_id: null,
+//       to_role_id: null,
+//       to_role_name: null,
+//       action: "CLOSED",
+//       remark: remark ? [remark] : [],
+//       level: role?.power_level || notesheet.level || 1,
+//       final_status: ACTION_STATUS.CLOSED, // 'COMPLETED'
+//     });
+
+//     await sendNotesheetMail({
+//       to_emp_id: notesheet.created_by_emp_id || notesheet.emp_id,
+//       type: "CLOSED",
+//       noteId,
+//       subject: notesheet.subject,
+//       actionBy: employee?.emp_name || "Unknown",
+//       actionByRole: role?.role_name,
+//       remark,
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Notesheet execution completed successfully",
+//     });
+//   } catch (error) {
+//     console.error("Complete Execution Error:", error);
+//     return res.status(500).json({ success: false, message: error.message });
+//   }
+// };
+
 export const completeExecutionNotesheet = async (req, res) => {
   try {
     const { noteId } = req.params;
@@ -1589,12 +1688,6 @@ export const completeExecutionNotesheet = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Execution step not found" });
 
-    // if (Number(executionStep.to_emp_id) !== Number(user.emp_id)) {
-    //   return res.status(403).json({
-    //     success: false,
-    //     message: "Only assigned execution user can close this notesheet",
-    //   });
-    // }
     if (String(notesheet.forward_to_role_id) !== String(userRoleId)) {
       return res
         .status(403)
@@ -1631,10 +1724,16 @@ export const completeExecutionNotesheet = async (req, res) => {
       action: "CLOSED",
       remark: remark ? [remark] : [],
       level: role?.power_level || notesheet.level || 1,
-      final_status: ACTION_STATUS.CLOSED, // 'COMPLETED'
+      final_status: ACTION_STATUS.CLOSED,
     });
 
-    await sendNotesheetMail({
+    // ✅ Respond immediately — mail/notification fire-and-forget
+    res.status(200).json({
+      success: true,
+      message: "Notesheet execution completed successfully",
+    });
+
+    sendNotesheetMail({
       to_emp_id: notesheet.created_by_emp_id || notesheet.emp_id,
       type: "CLOSED",
       noteId,
@@ -1642,12 +1741,24 @@ export const completeExecutionNotesheet = async (req, res) => {
       actionBy: employee?.emp_name || "Unknown",
       actionByRole: role?.role_name,
       remark,
-    });
+    }).catch((err) => console.error("Mail send failed (complete execution note):", err));
 
-    return res.status(200).json({
-      success: true,
-      message: "Notesheet execution completed successfully",
-    });
+    // 🔔 Notification
+    const notifyTarget = notesheet.created_by_emp_id || notesheet.emp_id;
+    if (notifyTarget) {
+      const io = req.app.get("io");
+      sendNotification(io, {
+        emp_id: notifyTarget,
+        role_id: null,
+        type: "CLOSED",
+        reference_id: notesheet.note_id,
+        reference_type: "Notesheet",
+        title: "Notesheet Closed",
+        message: `${notesheet.subject} execution completed and closed by ${employee?.emp_name ?? "Unknown"}`,
+      }).catch((err) =>
+        console.error("Notification send failed (complete execution note):", err),
+      );
+    }
   } catch (error) {
     console.error("Complete Execution Error:", error);
     return res.status(500).json({ success: false, message: error.message });
