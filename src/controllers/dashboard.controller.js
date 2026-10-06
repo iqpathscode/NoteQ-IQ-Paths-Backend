@@ -1,7 +1,9 @@
 import Notesheet from "../models/notes/notesheet.model.js";
 import Application from "../models/application/Application.model.js";
+import LeaveRequest from "../models/leave/LeaveRequest.model.js";
 import Department from "../models/office/department.model.js";
 import Employee from "../models/user/employee.model.js";
+import AppConfig from "../models/counter/AppConfig.js";
 
 const STATUS_STYLES = {
   APPROVED: {
@@ -26,6 +28,10 @@ const STATUS_STYLES = {
   },
   CLOSED: {
     label: "Closed",
+    statusColor: "text-slate-700 bg-slate-100 border border-slate-200",
+  },
+  CANCELLED: {
+    label: "Cancelled",
     statusColor: "text-slate-700 bg-slate-100 border border-slate-200",
   },
 };
@@ -55,8 +61,22 @@ const getStatusInfo = (status) => {
   };
 };
 
-// Same logic for BOTH notesheet and application now — no more type-specific overrides.
-// forwarded = IN_EXECUTION + QUERY_RAISED, closed = CLOSED (its own bucket).
+// Helper to detect forwarded / in-execution items
+const isItemForwarded = (item) => {
+  if (item.status === "IN_EXECUTION" || item.status === "QUERY_RAISED") return true;
+  if (item.status === "PENDING") {
+    if (item.forward_to_emp_id) return true;
+    if (Array.isArray(item.action_history) && item.action_history.some((a) => a.action === "FORWARDED")) return true;
+  }
+  return false;
+};
+
+// Helper to detect closed / cancelled items
+const isItemClosed = (item) => {
+  return item.status === "CLOSED" || item.status === "CANCELLED" || item.lifecycle_status === "CLOSED";
+};
+
+// Unified summary logic for notesheet, application, and leave
 const buildSummary = (items) => {
   const summary = {
     approved: 0,
@@ -71,11 +91,11 @@ const buildSummary = (items) => {
     const status = item.status;
 
     if (status === "APPROVED") summary.approved += 1;
-    else if (status === "PENDING") summary.pending += 1;
-    else if (status === "IN_EXECUTION") summary.forwarded += 1;
-    else if (status === "QUERY_RAISED") summary.forwarded += 1;
+    else if (isItemClosed(item)) summary.closed += 1;
     else if (status === "REJECTED") summary.rejected += 1;
-    else if (status === "CLOSED") summary.closed += 1;
+    else if (isItemForwarded(item)) summary.forwarded += 1;
+    else if (status === "PENDING") summary.pending += 1;
+    else summary.pending += 1;
   });
 
   return summary;
@@ -108,28 +128,29 @@ const buildDepartmentStats = (items, departmentNamesById) => {
     entry.total += 1;
 
     if (item.status === "APPROVED") entry.approved += 1;
-    else if (item.status === "PENDING") entry.pending += 1;
-    else if (item.status === "IN_EXECUTION") entry.forwarded += 1;
-    else if (item.status === "QUERY_RAISED") entry.forwarded += 1;
+    else if (isItemClosed(item)) entry.closed += 1;
     else if (item.status === "REJECTED") entry.rejected += 1;
-    else if (item.status === "CLOSED") entry.closed += 1;
+    else if (isItemForwarded(item)) entry.forwarded += 1;
+    else if (item.status === "PENDING") entry.pending += 1;
+    else entry.pending += 1;
   });
 
   const allEntry = ensureEntry("All");
   allEntry.approved = items.filter((item) => item.status === "APPROVED").length;
-  allEntry.pending = items.filter((item) => item.status === "PENDING").length;
-  allEntry.forwarded = items.filter((item) => item.status === "IN_EXECUTION" || item.status === "QUERY_RAISED").length;
+  allEntry.pending = items.filter((item) => item.status === "PENDING" && !isItemForwarded(item)).length;
+  allEntry.forwarded = items.filter((item) => isItemForwarded(item)).length;
   allEntry.rejected = items.filter((item) => item.status === "REJECTED").length;
-  allEntry.closed = items.filter((item) => item.status === "CLOSED").length;
+  allEntry.closed = items.filter((item) => isItemClosed(item)).length;
   allEntry.total = items.length;
 
   return Array.from(statsByDepartment.values()).filter((entry) => entry.name !== "All").concat([allEntry]);
 };
 
 const buildRecentActivities = (items, employeesById, departmentsById, type) => {
-  const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
-  const cutoff = Date.now() - TWELVE_HOURS_MS;
+  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - TWENTY_FOUR_HOURS_MS;
 
+  // Strictly filter items within the last 24 hours
   const recentItems = items.filter((item) => {
     const dateValue = item.createdAt || item.received_at || item.updatedAt;
     if (!dateValue) return false;
@@ -149,8 +170,8 @@ const buildRecentActivities = (items, employeesById, departmentsById, type) => {
     const statusInfo = getStatusInfo(item.status);
 
     return {
-      id: item.note_id || item.application_id || `${type}-${item._id}`,
-      title: item.subject || item.title || "Untitled",
+      id: item.leave_id || item.note_id || item.application_id || `${type}-${item._id}`,
+      title: item.reason || item.subject || item.title || "Untitled",
       user: userName,
       dept: deptName,
       status: statusInfo.label,
@@ -163,39 +184,56 @@ const buildRecentActivities = (items, employeesById, departmentsById, type) => {
 
 export const getCombinedDashboardData = async (req, res) => {
   try {
-    const [notesheets, applications, departments, employees] = await Promise.all([
-      Notesheet.find({ is_deleted: { $ne: true } }).lean(),
-      Application.find({ is_deleted: { $ne: true } }).lean(),
+    const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
+    const modules = appConfig?.modules || {
+      notesheet: true,
+      application: true,
+      leave: true,
+    };
+
+    const isNotesheetEnabled = modules.notesheet !== false;
+    const isApplicationEnabled = modules.application !== false;
+    const isLeaveEnabled = modules.leave !== false;
+
+    const [departments, employees, notesheets, applications, leaves] = await Promise.all([
       Department.find({}).lean(),
       Employee.find({}, { emp_id: 1, emp_name: 1 }).lean(),
+      isNotesheetEnabled ? Notesheet.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
+      isApplicationEnabled ? Application.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
+      isLeaveEnabled ? LeaveRequest.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
     ]);
 
     const departmentsById = new Map(departments.map((dept) => [dept.dept_id, dept.dept_name]));
     const employeesById = new Map(employees.map((employee) => [employee.emp_id, employee.emp_name]));
 
-    const notesheetSummary = buildSummary(notesheets);
-    const notesheetDepartmentStats = buildDepartmentStats(notesheets, departmentsById);
-    const notesheetActivities = buildRecentActivities(notesheets, employeesById, departmentsById, "notesheet");
-
-    const applicationSummary = buildSummary(applications);
-    const applicationDepartmentStats = buildDepartmentStats(applications, departmentsById);
-    const applicationActivities = buildRecentActivities(applications, employeesById, departmentsById, "application");
+    const responseData = {
+      notesheet: isNotesheetEnabled
+        ? {
+            summary: buildSummary(notesheets),
+            byDepartment: buildDepartmentStats(notesheets, departmentsById),
+            recentActivities: buildRecentActivities(notesheets, employeesById, departmentsById, "notesheet"),
+          }
+        : null,
+      application: isApplicationEnabled
+        ? {
+            summary: buildSummary(applications),
+            byDepartment: buildDepartmentStats(applications, departmentsById),
+            recentActivities: buildRecentActivities(applications, employeesById, departmentsById, "application"),
+          }
+        : null,
+      leave: isLeaveEnabled
+        ? {
+            summary: buildSummary(leaves),
+            byDepartment: buildDepartmentStats(leaves, departmentsById),
+            recentActivities: buildRecentActivities(leaves, employeesById, departmentsById, "leave"),
+          }
+        : null,
+    };
 
     return res.status(200).json({
       success: true,
       message: "Combined dashboard data fetched successfully",
-      data: {
-        notesheet: {
-          summary: notesheetSummary,
-          byDepartment: notesheetDepartmentStats,
-          recentActivities: notesheetActivities,
-        },
-        application: {
-          summary: applicationSummary,
-          byDepartment: applicationDepartmentStats,
-          recentActivities: applicationActivities,
-        },
-      },
+      data: responseData,
     });
   } catch (error) {
     console.error("Combined dashboard error:", error);

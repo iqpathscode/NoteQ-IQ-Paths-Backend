@@ -35,6 +35,7 @@ const getOrCreateConfig = async () => {
       value:          DEFAULT_LOGIN_CONFIG,
       categories:     DEFAULT_CATEGORIES,
       app_categories: DEFAULT_APP_CATEGORIES,
+      modules:        { notesheet: true, application: true, leave: true },
     });
   }
   return doc;
@@ -55,9 +56,11 @@ export const getAppConfig = async (req, res) => {
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((c) => ({ id: c._id, name: c.name, is_active: c.isActive }));
 
+    const modules = doc.modules || { notesheet: true, application: true, leave: true };
+
     return res.status(200).json({
       success: true,
-      data: { login_page: loginPage, categories, app_categories },
+      data: { login_page: loginPage, categories, app_categories, modules },
     });
   } catch (error) {
     console.error("getAppConfig error:", error);
@@ -352,5 +355,44 @@ export const deleteAppCategory = async (req, res) => {
   } catch (error) {
     console.error("deleteAppCategory error:", error);
     return res.status(500).json({ success: false, message: "Error deleting application category" });
+  }
+};
+
+// ─── PUT /api/admin/app-config/modules (Super Admin only) ────────────────────
+export const updateModulesConfig = async (req, res) => {
+  try {
+    const { notesheet, application, leave } = req.body;
+
+    const currentDoc = await getOrCreateConfig();
+    const currentModules = currentDoc.modules || { notesheet: true, application: true, leave: true };
+
+    const updatedModules = {
+      notesheet: typeof notesheet === "boolean" ? notesheet : (currentModules.notesheet ?? true),
+      application: typeof application === "boolean" ? application : (currentModules.application ?? true),
+      leave: typeof leave === "boolean" ? leave : (currentModules.leave ?? true),
+    };
+
+    // At least one module must be enabled
+    if (!updatedModules.notesheet && !updatedModules.application && !updatedModules.leave) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one module must remain enabled.",
+      });
+    }
+
+    const doc = await AppConfig.findOneAndUpdate(
+      { key: CONFIG_KEY },
+      { $set: { modules: updatedModules } },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "System modules licensing updated successfully",
+      data: doc.modules,
+    });
+  } catch (error) {
+    console.error("updateModulesConfig error:", error);
+    return res.status(500).json({ success: false, message: "Error updating module configuration" });
   }
 };

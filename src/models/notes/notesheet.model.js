@@ -1,5 +1,31 @@
 import mongoose from "mongoose";
 
+const attachmentRequestSchema = new mongoose.Schema(
+  {
+    requested_by_emp_id:   { type: Number, required: true },
+    requested_by_role_id:  { type: Number, required: true },
+    requested_by_role_name:{ type: String },
+    requested_by_name:     { type: String, required: true },
+    message:               { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["PENDING", "FULFILLED", "DISABLED"],
+      default: "PENDING",
+    },
+    // 🔄 single URL ki jagah array
+    fulfilled_attachments: [
+      {
+        url: { type: String },
+        name: { type: String },
+      },
+    ],
+    fulfilled_by_emp_id:        { type: Number, default: null },  // 🆕 kisne upload kiya (creator ya current holder)
+    fulfilled_at:                { type: Date, default: null },
+    disabled_by_emp_id:          { type: Number, default: null },
+    disabled_at:                  { type: Date, default: null },
+  },
+  { timestamps: true }
+);
 const notesheetSchema = new mongoose.Schema(
   {
     note_id: {
@@ -16,6 +42,12 @@ const notesheetSchema = new mongoose.Schema(
     dept_id: {
       type: Number,
       required: true,
+    },
+
+    school_id: {
+      type: Number,
+      default: null,
+      index: true,
     },
 
     subject: {
@@ -50,10 +82,12 @@ const notesheetSchema = new mongoose.Schema(
     forward_to_dept_id: { type: Number, default: null },
 
     // ================= ATTACHMENTS =================
-    attachments: {
+   attachments: {
       type: [String],
       default: [],
     },
+
+    attachmentRequests: [attachmentRequestSchema],
 
     reference_notesheet_id: {
       type: String,

@@ -17,7 +17,7 @@ export const createPower = async (req, res) => {
       });
     }
 
-    const allowedTypes = ["APPROVAL", "HIGHER"];
+    const allowedTypes = ["APPROVAL", "HIGHER", "HR", "MANAGEMENT"];
     if (!allowedTypes.includes(power_type)) {
       return res.status(400).json({
         success: false,

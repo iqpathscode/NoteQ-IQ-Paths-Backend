@@ -38,6 +38,7 @@ const adminSchema = new mongoose.Schema(
     is_active: { type: Boolean, default: true },
     last_login: { type: Date, default: null },
     is_admin: { type: Boolean, default: false },
+    is_super_admin: { type: Boolean, default: false },
 
     //  ADD THESE (IMPORTANT FIX)
     resetToken: {

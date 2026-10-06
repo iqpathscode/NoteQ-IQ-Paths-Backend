@@ -2,12 +2,14 @@ import http from 'http';
 import { Server } from 'socket.io';
 import app from './app.js';
 import dbConnect from "./src/config/db.config.js";
+import { autoSeedOnStartup } from "./src/config/autoSeed.js";
 import { env } from "./src/config/env.config.js";
 
 const port = env.PORT || 5000;
 
-// DB connect
+// DB connect & Auto-seed
 await dbConnect();
+await autoSeedOnStartup();
 
 // http server (socket.io ke liye express app ko wrap karna zaroori hai)
 const server = http.createServer(app);

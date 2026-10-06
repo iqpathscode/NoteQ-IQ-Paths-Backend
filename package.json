@@ -14,7 +14,8 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "seed:admin": "node scripts/seedAdmin.js"
+    "seed:admin": "node src/scripts/seedAdmin.js",
+    "seed:superadmin": "node src/scripts/seedSuperAdmin.js"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
