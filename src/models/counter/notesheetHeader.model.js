@@ -21,7 +21,18 @@ const extraFieldSchema = new mongoose.Schema(
 // ================= MAIN SCHEMA =================
 const notesheetHeaderSchema = new mongoose.Schema(
   {
-    // ================= REQUIRED =================
+    // ================= SCHOOL / COLLEGE REFERENCE =================
+    school_id: {
+      type: Number,
+      default: null,
+      index: true,
+    },
+
+    school_name: {
+      type: String,
+      trim: true,
+      default: "",
+    },
 
     college_name: {
       type: String,

@@ -29,6 +29,11 @@ const roleSchema = new mongoose.Schema(
       default: false,
     },
 
+    canReceiveLeaveRequest: {
+      type: Boolean,
+      default: false,
+    },
+
     view_scope: {
   type: String,
   enum: ["OWN", "DEPARTMENT", "ALL"],

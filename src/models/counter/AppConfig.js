@@ -15,6 +15,12 @@ const appConfigSchema = new mongoose.Schema(
     value:          { type: mongoose.Schema.Types.Mixed, default: {} },
     categories:     { type: [categorySchema], default: [] },
     app_categories: { type: [categorySchema], default: [] },
+    modules: {
+      notesheet:   { type: Boolean, default: true },
+      application: { type: Boolean, default: true },
+      leave:       { type: Boolean, default: true },
+      recruitment: { type: Boolean, default: true },
+    },
   },
   { timestamps: true }
 );

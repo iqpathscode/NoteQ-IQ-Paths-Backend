@@ -1,17 +1,20 @@
 import "dotenv/config";
 import mongoose from "mongoose";
-import bcrypt from "bcrypt";
-import Admin from "../src/models/user/admin.model.js"; 
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import Admin from "../src/models/user/admin.model.js";
 const MONGO_URI = process.env.MONGO_URI;
+
+const envPassword = process.env.SEED_ADMIN_PASSWORD;
 
 const DEFAULT_ADMIN = {
   admin_id: 1,
   admin_name: process.env.SEED_ADMIN_NAME || "Admin",
   designation: process.env.SEED_ADMIN_DESIGNATION || "Super Admin",
   mobile_number: process.env.SEED_ADMIN_MOBILE || "8756379365",
-  email: process.env.SEED_ADMIN_EMAIL || "gawanderinki1016@gmail.com",
+  email: process.env.SEED_ADMIN_EMAIL,
   // Plaintext password — sirf seed ke waqt use hota hai, DB me hamesha hashed hi jaayega
-  password: process.env.SEED_ADMIN_PASSWORD || "Admin@123",
+  password: envPassword || crypto.randomBytes(9).toString("base64url"),
   is_active: true,
   is_admin: true,
 };
@@ -20,6 +23,10 @@ const seedAdmin = async () => {
   try {
     if (!MONGO_URI) {
       throw new Error("MONGO_URI is not set in environment variables");
+    }
+
+    if (!DEFAULT_ADMIN.email) {
+      throw new Error("SEED_ADMIN_EMAIL is not set in environment variables");
     }
 
     await mongoose.connect(MONGO_URI);

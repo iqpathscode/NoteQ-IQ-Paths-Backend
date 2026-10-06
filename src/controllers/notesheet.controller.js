@@ -324,14 +324,14 @@ export const getNotesheetById = async (req, res) => {
           id: { $toString: "$note_id" },
           note_id: 1,
           title: "$subject",
-          subject: 1,       // ✅ edit form ke liye
-          category: 1,      // ✅ edit form ke liye
-          priority: 1,      // ✅ edit form ke liye
-          description: 1,   // ✅ edit form ke liye
-          createdAt: 1,     // ✅ 10-min check ke liye
+          subject: 1,       
+          category: 1,   
+          priority: 1,      
+          description: 1,
+          createdAt: 1,     
           date: "$createdAt",
           status: 1,
-          attachment: 1,
+          attachments: 1,
           submittedBy: 1,
           submittedTo: 1,
           emp_id: 1,
@@ -449,6 +449,7 @@ export const getApprovalFlow = async (req, res) => {
           from_signature: "$fromEmployee.signature",
           from_department: "$fromDept.dept_name",
           from_school: "$fromSchool.school_name",
+          from_school_id: "$fromEmployee.school_id",
           from_designation: "$fromEmployee.designation",
         },
       },
@@ -468,6 +469,7 @@ export const getApprovalFlow = async (req, res) => {
           from_signature: 1,
           from_department: 1,
           from_school: 1,
+          from_school_id: 1,
           from_designation: 1,
           to_emp_id: 1,
           to_name: 1,
@@ -498,6 +500,11 @@ export const getApprovalFlow = async (req, res) => {
         return entry;
       })
     );
+
+    // Ensure school_id exists on notesheet object for backward compatibility
+    if (!notesheet.school_id && enrichedFlow?.[0]?.from_school_id) {
+      notesheet.school_id = enrichedFlow[0].from_school_id;
+    }
 
     return res.status(200).json({
       success: true,

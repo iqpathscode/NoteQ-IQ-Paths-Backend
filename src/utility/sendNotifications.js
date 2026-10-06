@@ -25,6 +25,8 @@ export async function sendNotification(io, { emp_id, role_id, type, reference_id
     await Notification.deleteMany({ _id: { $in: idsToDelete } });
   }
 
-  io.to(`emp_${emp_id}`).emit("new_notification", notif);
+  if (io) {
+    io.to(`emp_${emp_id}`).emit("new_notification", notif);
+  }
   return notif;
 }

@@ -7,8 +7,10 @@ import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
 import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
+import LeaveTemporaryRole from "../../models/leave/LeaveTemporaryRole.model.js";
 import crypto from "crypto";
 import redis from "../../config/redis.config.js";
+import AppConfig from "../../models/counter/AppConfig.js";
 
 // ── Brevo sendMail utility (sgMail ki jagah) ─────────────────────────────────
 import { sendMail } from "../../utility/sendMail.js"; 
@@ -16,6 +18,10 @@ import { sendMail } from "../../utility/sendMail.js";
 export const login = async (req, res) => {
   try {
     const { email, password, rememberMe } = req.body;
+
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      return res.status(400).json({ success: false, message: "Valid email and password are required" });
+    }
 
     const admin = await Admin.findOne({ email });
     if (admin) {
@@ -28,8 +34,13 @@ export const login = async (req, res) => {
         return res.status(401).json({ success: false, message: "Invalid credentials" });
       }
 
+      const isSuper =
+        !!admin.is_super_admin ||
+        (process.env.SUPER_ADMIN_EMAIL &&
+          admin.email?.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
+
       const token = jwt.sign(
-        { admin_id: admin.admin_id, isAdmin: true },
+        { admin_id: admin.admin_id, isAdmin: true, is_super_admin: isSuper },
         env.JWT_SECRET,
         { expiresIn: env.JWT_EXPIRES_IN },
       );
@@ -45,11 +56,16 @@ export const login = async (req, res) => {
         maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
       });
 
+      const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
+      const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
+
       return res.status(200).json({
         success: true,
         message: "Admin login successful",
         isAdmin: true,
+        is_super_admin: isSuper,
         canReceiveNotesheet: true,
+        modules,
       });
     }
 
@@ -91,6 +107,9 @@ export const login = async (req, res) => {
 
     const rolePower = await Power.findOne({ power_id: user.active_role?.power_id });
 
+    const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
+    const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
+
     return res.status(200).json({
       success: true,
       message: "User login successful",
@@ -99,6 +118,8 @@ export const login = async (req, res) => {
       isAdmin: false,
       isDefaultPassword,
       canReceiveNotesheet: user.active_role?.canReceiveNotesheet || false,
+      canReceiveLeaveRequest: user.active_role?.canReceiveLeaveRequest || false,
+      modules,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Login failed", error: error.message });
@@ -152,16 +173,26 @@ export const getMe = async (req, res) => {
       if (!admin) {
         return res.status(404).json({ success: false, message: "Admin not found" });
       }
+      const isSuper =
+        !!admin.is_super_admin ||
+        (process.env.SUPER_ADMIN_EMAIL &&
+          admin.email?.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
+      const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
+      const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
+
       return res.json({
         success: true,
         user: {
           admin_id: admin.admin_id,
-          username: admin.username,
+          username: admin.admin_name || admin.username,
+          email: admin.email,
           isAdmin: true,
+          is_super_admin: isSuper,
           roles: [],
           active_role: null,
           canReceiveNotesheet: false,
         },
+        modules,
       });
     }
 
@@ -173,16 +204,48 @@ export const getMe = async (req, res) => {
     const roles = await Role.find({ role_id: { $in: employee.role_ids || [] } }).lean();
     const powers = await Power.find({ power_id: { $in: roles.map((r) => r.power_id) } }).lean();
 
+    // Detect active temporary roles assigned to this employee (for Leave Portal only)
+    const activeTempRoles = await LeaveTemporaryRole.find({
+      interim_emp_id: employee.emp_id,
+      status: "ACTIVE",
+    }).lean();
+    const tempRoleIds = new Set([
+      ...(employee.temporary_role_ids || []).map(Number),
+      ...activeTempRoles.map((t) => Number(t.role_id)),
+    ]);
+    const tempRoleMap = Object.fromEntries(activeTempRoles.map((t) => [Number(t.role_id), t]));
+
     const rolesWithPower = roles.map((role) => {
       const power = powers.find((p) => p.power_id === role.power_id);
+      const isTemp = tempRoleIds.has(Number(role.role_id));
+      const tempAssignment = tempRoleMap[Number(role.role_id)];
+
       return {
         ...role,
         power_level: power?.power_level || 1,
         power_type:  power?.power_type  || null,
+        is_temporary: isTemp,
+        leave_only: isTemp,
+        // Temporary role charge has NO notesheet/application powers; ONLY leave approvals!
+        canReceiveNotesheet: isTemp ? false : (role.canReceiveNotesheet || false),
+        canReceiveLeaveRequest: isTemp ? true : (role.canReceiveLeaveRequest || false),
+        temporary_details: tempAssignment ? {
+          leave_id: tempAssignment.leave_id,
+          original_emp_name: tempAssignment.original_emp_name,
+          start_date: tempAssignment.start_date,
+          end_date: tempAssignment.end_date,
+        } : null,
       };
     });
 
-    const activeRole = rolesWithPower.find((r) => r.role_id === employee.active_role_id);
+    let activeRole = rolesWithPower.find((r) => r.role_id === employee.active_role_id);
+    if (!activeRole && rolesWithPower.length > 0) {
+      activeRole = rolesWithPower[0];
+      Employee.updateOne({ emp_id: employee.emp_id }, { active_role_id: activeRole.role_id }).catch(() => {});
+    }
+
+    const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
+    const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
 
     return res.json({
       success: true,
@@ -193,10 +256,13 @@ export const getMe = async (req, res) => {
         isAdmin:            false,
         isDefaultPassword:  employee.isDefaultPassword ?? true,
         role_ids:           employee.role_ids,
+        temporary_role_ids: Array.from(tempRoleIds),
         roles:              rolesWithPower,
         active_role:        activeRole || null,
-        canReceiveNotesheet: activeRole?.canReceiveNotesheet || false,
+        canReceiveNotesheet: activeRole?.is_temporary ? false : (activeRole?.canReceiveNotesheet || false),
+        canReceiveLeaveRequest: activeRole?.is_temporary ? true : (activeRole?.canReceiveLeaveRequest || false),
       },
+      modules,
     });
   } catch (error) {
     console.error("Error in getMe:", error.message);
@@ -232,19 +298,19 @@ export const logout = async (req, res) => {
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
-  console.log("Incoming email:", email);
+  if (typeof email !== "string" || !email.trim()) {
+    return res.status(400).json({ message: "Valid email is required" });
+  }
+
   let user = await Employee.findOne({ email });
-  console.log("Employee found:", user);
   let userType = "employee";
 
   if (!user) {
     user = await Admin.findOne({ email });
-    console.log("Admin found:", user);
     userType = "admin";
   }
 
   if (!user) {
-    console.log("User not found in both collections");
     return res.status(404).json({ message: "User not found" });
   }
 
@@ -330,17 +396,7 @@ export const resetPassword = async (req, res) => {
 
   const normalizedType = type?.toLowerCase()?.trim();
 
-  console.log("TOKEN FROM URL:", token);
-
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-  console.log("HASHED TOKEN:", hashedToken);
-
-  const adminUser = await Admin.findOne({ resetToken: hashedToken });
-  const empUser = await Employee.findOne({ resetToken: hashedToken });
-
-  console.log("ADMIN USER:", adminUser);
-  console.log("EMP USER:", empUser);
 
   let user;
 

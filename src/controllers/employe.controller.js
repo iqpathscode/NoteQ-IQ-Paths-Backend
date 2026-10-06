@@ -9,6 +9,8 @@ import School from "../models/office/school.model.js";
 import Admin from "../models/user/admin.model.js";
 import Power from "../models/userPowers/power.model.js";
 import Application from "../models/application/Application.model.js";
+import LeaveTemporaryRole from "../models/leave/LeaveTemporaryRole.model.js";
+import LeaveRequest from "../models/leave/LeaveRequest.model.js";
 
 const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CLOSED", "IN_EXECUTION"];
 
@@ -49,8 +51,17 @@ const employeeDetailsPipeline = (matchStage = null) => {
       },
     },
     {
+      $lookup: {
+        from: School.collection.name,
+        localField: "school_id",
+        foreignField: "school_id",
+        as: "schoolInfo",
+      },
+    },
+    {
       $addFields: {
         department_name: { $arrayElemAt: ["$department.dept_name", 0] },
+        school_name: { $arrayElemAt: ["$schoolInfo.school_name", 0] },
 
         // ---- PERSONAL: created_by_role_id === null ----
         personal_notesheets: {
@@ -183,6 +194,8 @@ const employeeDetailsPipeline = (matchStage = null) => {
         role_ids: 1,
         active_role_id: 1,
         dept_id: 1,
+        school_id: 1,
+        school_name: 1,
         department_name: 1,
         notesheet_count: 1,
         personal_summary: 1,
@@ -602,6 +615,17 @@ export const switchEmployeeRole = async (req, res) => {
         .json({ success: false, message: "Role not found in Role table" });
     }
 
+    // Check if role is a temporary role (assigned for Leave module only)
+    const activeTempRecord = await LeaveTemporaryRole.findOne({
+      interim_emp_id: employee.emp_id,
+      role_id: Number(role_id),
+      status: "ACTIVE",
+    }).lean();
+    const isTempRole = Boolean(
+      activeTempRecord ||
+      (employee.temporary_role_ids && employee.temporary_role_ids.includes(Number(role_id)))
+    );
+
     //  Update active_role_id and optional full role object
     employee.active_role_id = Number(role_id);
     employee.active_role = {
@@ -610,8 +634,13 @@ export const switchEmployeeRole = async (req, res) => {
       dept_id: employee.dept_id,
       power_id: roleFromRoleTable.power_id,
       power_level: roleFromRoleTable.power_level,
-      canReceiveNotesheet: roleFromRoleTable.canReceiveNotesheet,
-      view_scope: roleFromRoleTable.view_scope || "MY",
+      // Strictly NO notesheet powers for temporary leave charge!
+      canReceiveNotesheet: isTempRole ? false : (roleFromRoleTable.canReceiveNotesheet || false),
+      canReceiveLeaveRequest: isTempRole ? true : (roleFromRoleTable.canReceiveLeaveRequest || false),
+      is_temporary: isTempRole,
+      leave_only: isTempRole,
+      temporary_leave_id: activeTempRecord?.leave_id || null,
+      view_scope: isTempRole ? "MY" : (roleFromRoleTable.view_scope || "MY"),
     };
     await employee.save();
 
@@ -772,6 +801,18 @@ export const transferRole = async (req, res) => {
       {
         forward_to_role_id: roleIdNum,
         status: { $in: ["PENDING", "QUERY_RAISED", "IN_EXECUTION"] },
+      },
+      {
+        $set: {
+          current_holder_emp_id: Number(newUserId),
+          forward_to_emp_id: Number(newUserId),
+        },
+      },
+    );
+    await LeaveRequest.updateMany(
+      {
+        forward_to_role_id: roleIdNum,
+        status: "PENDING",
       },
       {
         $set: {

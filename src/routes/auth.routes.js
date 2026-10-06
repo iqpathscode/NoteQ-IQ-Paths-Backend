@@ -116,7 +116,7 @@ import { uploadExcel } from "../utility/excel.js";
 
 
 // Middleware
-import { authenticate, isAdmin, verifyAdminSecret  } from "../middlewares/auth.middleware.js";
+import { authenticate, isAdmin, verifyAdminSecret, ensureNotTemporaryRole, requireModule } from "../middlewares/auth.middleware.js";
 import { loginRateLimiter, forgotPasswordRateLimiter } from "../middlewares/rateLimiter.middleware.js"
 
 import {
@@ -128,6 +128,8 @@ import {
 } from "../controllers/notesheetHeader.controller.js";
 
 const router = express.Router();
+
+const blockTempRoleNotesheet = ensureNotTemporaryRole("Notesheet");
 
 router.post("/admin", verifyAdminSecret, createAdmin); 
 
@@ -184,42 +186,42 @@ router.put("/update-profile", authenticate, upload.single("signature"), updatePr
 // ======================== EMPLOYEES ========================
 router.get("/employees", authenticate, getEmployeesWithDetails);
 router.get("/employee/:empId", authenticate, getEmployeeDetailsById);
-router.get("/employee/:empId/notesheets/summary", authenticate, getEmployeeNotesheetSummary);
-router.get("/notesheets/approved", authenticate, getApprovedNotesheetsByRole);
+router.get("/employee/:empId/notesheets/summary", authenticate, requireModule("notesheet"), getEmployeeNotesheetSummary);
+router.get("/notesheets/approved", authenticate, requireModule("notesheet"), getApprovedNotesheetsByRole);
 
 
 // ======================== NOTESHEET ========================
-router.post("/notesheet", authenticate, createNotesheet);
-router.get("/notesheets/execution", authenticate, getExecutionNotesheets);
-router.get("/notesheet/for-ref", authenticate, getNotesheetForRef);
+router.post("/notesheet", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), createNotesheet);
+router.get("/notesheets/execution", authenticate, requireModule("notesheet"), getExecutionNotesheets);
+router.get("/notesheet/for-ref", authenticate, requireModule("notesheet"), getNotesheetForRef);
 
-router.get("/notesheets", authenticate, getAllNotesheets);
-router.get("/notesheets/recent", authenticate, getRecentNotesheets);
-router.get("/notesheets/received", authenticate, getReceivedNotesheets);
-router.get("/notesheets/employee", authenticate, getNotesheetsForEmployee);
-router.get("/notesheets/scope", authenticate, getAllNotesheetsByScope);
-router.get("/notesheets/processed", authenticate, getProcessedNotesheets);
+router.get("/notesheets", authenticate, requireModule("notesheet"), getAllNotesheets);
+router.get("/notesheets/recent", authenticate, requireModule("notesheet"), getRecentNotesheets);
+router.get("/notesheets/received", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), getReceivedNotesheets);
+router.get("/notesheets/employee", authenticate, requireModule("notesheet"), getNotesheetsForEmployee);
+router.get("/notesheets/scope", authenticate, requireModule("notesheet"), getAllNotesheetsByScope);
+router.get("/notesheets/processed", authenticate, requireModule("notesheet"), getProcessedNotesheets);
 router.get("/departments/by-role", authenticate, getDepartmentsByRole);
 router.get("/dashboard/combined", authenticate, getCombinedDashboardData);
 
-router.get("/notesheets/:noteId/locate", authenticate, locateNotesheet);
-router.get("/notesheets/:noteId/approval-flow", authenticate, getApprovalFlow);
-router.get("/notesheets/:noteId", authenticate, getNotesheetById); 
-router.delete("/notesheet/:note_id", authenticate, deleteNotesheet);
-router.put("/notesheet/:note_id/edit", authenticate, editNotesheet);
+router.get("/notesheets/:noteId/locate", authenticate, requireModule("notesheet"), locateNotesheet);
+router.get("/notesheets/:noteId/approval-flow", authenticate, requireModule("notesheet"), getApprovalFlow);
+router.get("/notesheets/:noteId", authenticate, requireModule("notesheet"), getNotesheetById); 
+router.delete("/notesheet/:note_id", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), deleteNotesheet);
+router.put("/notesheet/:note_id/edit", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), editNotesheet);
 
 
 // ======================== NOTESHEET ACTIONS ========================
-router.put("/notesheets/:noteId/approve-direct", authenticate, approveNotesheetDirect);
-router.put("/notesheets/:noteId/approve-chain", authenticate, approveNotesheetChain);
-router.put("/notesheets/:noteId/forward-direct", authenticate, forwardNotesheetDirect);
-router.put("/notesheets/forward", authenticate, forwardChainOnly);
-router.put("/notesheets/:noteId/reject", authenticate, rejectNotesheet);
-router.put("/notesheets/:noteId/query", authenticate, sendQuery);
-router.put("/notesheets/:noteId/reply-query", authenticate, replyQuery);
-router.get("/notesheets/:noteId/queries", authenticate, getQueriesByNoteId);
-router.put("/notesheets/:noteId/forward-execution", authenticate, forwardExecutionNotesheet);
-router.put("/notesheets/:noteId/complete-execution", authenticate, completeExecutionNotesheet);
+router.put("/notesheets/:noteId/approve-direct", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), approveNotesheetDirect);
+router.put("/notesheets/:noteId/approve-chain", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), approveNotesheetChain);
+router.put("/notesheets/:noteId/forward-direct", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), forwardNotesheetDirect);
+router.put("/notesheets/forward", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), forwardChainOnly);
+router.put("/notesheets/:noteId/reject", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), rejectNotesheet);
+router.put("/notesheets/:noteId/query", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), sendQuery);
+router.put("/notesheets/:noteId/reply-query", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), replyQuery);
+router.get("/notesheets/:noteId/queries", authenticate, requireModule("notesheet"), getQueriesByNoteId);
+router.put("/notesheets/:noteId/forward-execution", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), forwardExecutionNotesheet);
+router.put("/notesheets/:noteId/complete-execution", authenticate, blockTempRoleNotesheet, requireModule("notesheet"), completeExecutionNotesheet);
 
 
 // ======================== NOTESHEET HEADERS ========================

@@ -29,17 +29,36 @@ const MAX_NOTIFICATIONS = 5;
 router.get('/', async (req, res) => {
   try {
     const empId = Number(req.user.emp_id);
-    const roleId = Number(req.user.active_role_id);
+    const roleId = req.user.active_role_id ? Number(req.user.active_role_id) : null;
 
-    if (!roleId) {
-      return res.status(400).json({ success: false, message: "No active role set for this employee" });
-    }
+    // 🔄 role_id ke exact match ke bajaye — emp match + (role match YA role_id null wali notifications)
+    const query = roleId
+      ? { emp_id: empId, $or: [{ role_id: roleId }, { role_id: null }] }
+      : { emp_id: empId, role_id: null };   // role-less user ko sirf role-agnostic wali milengi
 
-    const notifications = await Notification.find({ emp_id: empId, role_id: roleId })
+    const notifications = await Notification.find(query)
       .sort({ createdAt: -1 })
-      .limit(5);
+      .limit(MAX_NOTIFICATIONS);
 
     res.json(notifications);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Mark all notifications as read for current user
+router.put('/mark-read', async (req, res) => {
+  try {
+    const empId = Number(req.user.emp_id);
+    const roleId = req.user.active_role_id ? Number(req.user.active_role_id) : null;
+
+    const query = roleId
+      ? { emp_id: empId, $or: [{ role_id: roleId }, { role_id: null }] }
+      : { emp_id: empId, role_id: null };
+
+    await Notification.updateMany(query, { $set: { is_read: true } });
+
+    res.json({ success: true, message: 'Notifications marked as read' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

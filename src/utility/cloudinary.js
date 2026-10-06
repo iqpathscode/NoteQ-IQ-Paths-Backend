@@ -24,4 +24,27 @@ const storage = new CloudinaryStorage({
   },
 });
 
-export const upload = multer({ storage });
+const ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
+const fileFilter = (req, file, cb) => {
+  if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    return cb(null, true);
+  }
+  cb(new Error("Unsupported file type"));
+};
+
+export const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB per file
+});

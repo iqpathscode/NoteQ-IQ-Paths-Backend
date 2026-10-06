@@ -4,18 +4,28 @@ const notificationSchema = new mongoose.Schema(
   {
     emp_id: { type: Number, required: true, index: true }, // Employee.emp_id — kisko notification jaani hai
 
-    role_id: { type: Number, required: true }, // konsa role active tha jab notification bani (multi-role support ke liye)
+   role_id: { type: Number, default: null },
 
     type: {
       type: String,
-      enum: ["RECEIVED", "FOR_CLOSURE", "QUERY", "APPROVED", "REJECTED"],
+      enum: [
+        "RECEIVED",
+        "FOR_CLOSURE",
+        "QUERY",
+        "APPROVED",
+        "REJECTED",
+        "ATTACHMENT_REQUESTED",
+        "ATTACHMENT_UPLOADED",
+        "CLOSED",
+        "INFO",
+      ],
       required: true,
     },
 
-   reference_id: { type: mongoose.Schema.Types.Mixed, required: true }, 
+    reference_id: { type: mongoose.Schema.Types.Mixed, required: true },
     reference_type: {
       type: String,
-      enum: ["Notesheet", "Application"],
+      enum: ["Notesheet", "Application", "Leave"],
       required: true,
     },
 
@@ -24,7 +34,7 @@ const notificationSchema = new mongoose.Schema(
 
     is_read: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Indexes — inbox query fast rahe isliye

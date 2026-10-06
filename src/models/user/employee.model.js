@@ -35,6 +35,12 @@ const employeeSchema = new mongoose.Schema(
       default: [],
     },
 
+    //  Temporary roles (assigned for Leave module only)
+    temporary_role_ids: {
+      type: [Number],
+      default: [],
+    },
+
     //  Active role
     active_role_id: {
       type: Number,

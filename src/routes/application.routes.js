@@ -28,17 +28,19 @@ import {
   getExecutionApplications,
   locateApplication
 } from "../controllers/application.controller.js";
-import { isAdmin } from "../middlewares/auth.middleware.js";
+import { isAdmin, ensureNotTemporaryRole } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
 router.use(authenticate);
 
+const blockTempRole = ensureNotTemporaryRole("Application");
+
 // ── List Routes ───────────────────────────────────────────────────────────────
-router.post("/", upload.array("attachments", 5), createApplication);
-router.get("/my",authenticate, getAllApplicationsByScope);
+router.post("/", blockTempRole, upload.array("attachments", 5), createApplication);
+router.get("/my", authenticate, getAllApplicationsByScope);
 router.get("/admin/all", isAdmin, getAllApplications);
-router.get("/received",authenticate, getReceivedApplications);
+router.get("/received", authenticate, blockTempRole, getReceivedApplications);
 router.get("/processed", authenticate, getProcessedApplications);
 router.get("/approved-by-role", authenticate, getApprovedApplicationsByRole);
 router.get("/execution", authenticate, getExecutionApplications);
@@ -53,14 +55,14 @@ router.get("/:application_id/locate", authenticate, locateApplication);
 
 // ── Single Application — KEEP LAST ───────────────────────────────────────────
 router.get("/:application_id", authenticate, getApplicationById);
-router.put("/:application_id/edit", authenticate, editApplication);
-router.patch("/:application_id/approve/direct", authenticate, approveApplicationDirect);
-router.patch("/:application_id/approve/chain", authenticate, approveApplicationChain);
-router.patch("/:application_id/forward/direct", authenticate, forwardApplicationDirect);
-router.patch("/:application_id/forward/chain", authenticate, forwardApplicationChain);
-router.patch("/:application_id/close", authenticate, closeApplication);
-router.patch("/:application_id/reject", authenticate, rejectApplication);
-router.patch("/:application_id/query", authenticate, raiseQuery);
+router.put("/:application_id/edit", authenticate, blockTempRole, editApplication);
+router.patch("/:application_id/approve/direct", authenticate, blockTempRole, approveApplicationDirect);
+router.patch("/:application_id/approve/chain", authenticate, blockTempRole, approveApplicationChain);
+router.patch("/:application_id/forward/direct", authenticate, blockTempRole, forwardApplicationDirect);
+router.patch("/:application_id/forward/chain", authenticate, blockTempRole, forwardApplicationChain);
+router.patch("/:application_id/close", authenticate, blockTempRole, closeApplication);
+router.patch("/:application_id/reject", authenticate, blockTempRole, rejectApplication);
+router.patch("/:application_id/query", authenticate, blockTempRole, raiseQuery);
 router.patch("/execution/start/:applicationId", authenticate, forwardExecutionApplication);
 router.patch("/execution/complete/:applicationId", authenticate, completeExecutionApplication);
 router.get("/:application_id/queries", authenticate, getQueriesByApplicationId);
