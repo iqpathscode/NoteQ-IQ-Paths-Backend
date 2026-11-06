@@ -48,12 +48,12 @@ export const getAppConfig = async (req, res) => {
 
     const loginPage = { ...DEFAULT_LOGIN_CONFIG, ...doc.value };
 
-    const categories = doc.categories
-      .sort((a, b) => a.sortOrder - b.sortOrder)
+    const categories = (doc.categories || [])
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
       .map((c) => ({ id: c._id, name: c.name, is_active: c.isActive }));
 
     const app_categories = (doc.app_categories || [])
-      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
       .map((c) => ({ id: c._id, name: c.name, is_active: c.isActive }));
 
     const modules = doc.modules || { notesheet: true, application: true, leave: true };
@@ -91,8 +91,7 @@ export const updateLoginConfig = async (req, res) => {
     const updated = await AppConfig.findOneAndUpdate(
       { key: CONFIG_KEY },
       { $set: { value: merged } },
-      // { new: true }
-    { returnDocument: 'after'}
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({
@@ -121,7 +120,6 @@ export const uploadCampusImage = async (req, res) => {
     await AppConfig.findOneAndUpdate(
       { key: CONFIG_KEY },
       { $set: { value: merged } },
-      // { new: true }
       { returnDocument: 'after' }
     );
 
@@ -151,7 +149,7 @@ export const addCategory = async (req, res) => {
 
     const doc = await getOrCreateConfig();
 
-    const duplicate = doc.categories.find(
+    const duplicate = (doc.categories || []).find(
       (c) => c.name.toLowerCase() === name.trim().toLowerCase()
     );
     if (duplicate) {
@@ -165,11 +163,10 @@ export const addCategory = async (req, res) => {
           categories: {
             name:      name.trim(),
             isActive:  true,
-            sortOrder: sort_order ?? 0,
+            sortOrder: sort_order ?? ((doc.categories?.length || 0) + 1),
           },
         },
       },
-      // { new: true }
       { returnDocument: 'after' }
     );
 
@@ -204,7 +201,6 @@ export const updateCategory = async (req, res) => {
     const updated = await AppConfig.findOneAndUpdate(
       { key: CONFIG_KEY, "categories._id": id },
       { $set: setFields },
-      // { new: true }
       { returnDocument: 'after' }
     );
 
@@ -212,7 +208,13 @@ export const updateCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: "Category not found" });
     }
 
-    const updatedCat = updated.categories.find((c) => c._id.toString() === id);
+    const updatedCat = (updated.categories || []).find(
+      (c) => c && c._id && c._id.toString() === String(id)
+    );
+
+    if (!updatedCat) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
 
     return res.status(200).json({
       success: true,
@@ -231,9 +233,9 @@ export const deleteCategory = async (req, res) => {
     const { id } = req.params;
 
     const updated = await AppConfig.findOneAndUpdate(
-      { key: CONFIG_KEY, "categories._id": id },
-      { $set: { "categories.$.isActive": false } },
-      { new: true }
+      { key: CONFIG_KEY },
+      { $pull: { categories: { _id: id } } },
+      { returnDocument: 'after' }
     );
 
     if (!updated) {
@@ -276,11 +278,10 @@ export const addAppCategory = async (req, res) => {
           app_categories: {
             name:      name.trim(),
             isActive:  true,
-            sortOrder: sort_order ?? 0,
+            sortOrder: sort_order ?? ((doc.app_categories?.length || 0) + 1),
           },
         },
       },
-      // { new: true }
       { returnDocument: 'after' }
     );
 
@@ -315,7 +316,6 @@ export const updateAppCategory = async (req, res) => {
     const updated = await AppConfig.findOneAndUpdate(
       { key: CONFIG_KEY, "app_categories._id": id },
       { $set: setFields },
-      // { new: true }
       { returnDocument: 'after' }
     );
 
@@ -323,7 +323,13 @@ export const updateAppCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: "Application category not found" });
     }
 
-    const updatedCat = updated.app_categories.find((c) => c._id.toString() === id);
+    const updatedCat = (updated.app_categories || []).find(
+      (c) => c && c._id && c._id.toString() === String(id)
+    );
+
+    if (!updatedCat) {
+      return res.status(404).json({ success: false, message: "Application category not found" });
+    }
 
     return res.status(200).json({
       success: true,
@@ -342,9 +348,9 @@ export const deleteAppCategory = async (req, res) => {
     const { id } = req.params;
 
     const updated = await AppConfig.findOneAndUpdate(
-      { key: CONFIG_KEY, "app_categories._id": id },
-      { $set: { "app_categories.$.isActive": false } },
-      { new: true }
+      { key: CONFIG_KEY },
+      { $pull: { app_categories: { _id: id } } },
+      { returnDocument: 'after' }
     );
 
     if (!updated) {
@@ -383,7 +389,7 @@ export const updateModulesConfig = async (req, res) => {
     const doc = await AppConfig.findOneAndUpdate(
       { key: CONFIG_KEY },
       { $set: { modules: updatedModules } },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     return res.status(200).json({
