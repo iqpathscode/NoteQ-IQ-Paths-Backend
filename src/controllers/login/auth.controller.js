@@ -65,6 +65,7 @@ export const login = async (req, res) => {
         isAdmin: true,
         is_super_admin: isSuper,
         canReceiveNotesheet: true,
+        token,
         modules,
       });
     }
@@ -119,6 +120,7 @@ export const login = async (req, res) => {
       isDefaultPassword,
       canReceiveNotesheet: user.active_role?.canReceiveNotesheet || false,
       canReceiveLeaveRequest: user.active_role?.canReceiveLeaveRequest || false,
+      token,
       modules,
     });
   } catch (error) {

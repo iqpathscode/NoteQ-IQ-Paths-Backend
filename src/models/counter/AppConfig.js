@@ -19,7 +19,6 @@ const appConfigSchema = new mongoose.Schema(
       notesheet:   { type: Boolean, default: true },
       application: { type: Boolean, default: true },
       leave:       { type: Boolean, default: true },
-      recruitment: { type: Boolean, default: true },
     },
   },
   { timestamps: true }
