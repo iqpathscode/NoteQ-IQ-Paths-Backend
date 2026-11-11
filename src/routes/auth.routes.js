@@ -139,7 +139,7 @@ router.post("/login", loginRateLimiter, login);
 router.get("/me", authenticate, getMe);
 router.put("/change-password", authenticate, changePassword);
 router.post("/admin/create-user", authenticate, isAdmin, createUserByAdmin);
-router.post("/logout", authenticate, logout);
+router.post("/logout", logout);
 router.post("/forgot-password", forgotPasswordRateLimiter, forgotPassword);
 router.post("/reset-password/:token", resetPassword);
 

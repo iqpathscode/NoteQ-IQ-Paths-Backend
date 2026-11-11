@@ -1,156 +1,243 @@
-import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { env } from "../config/env.config.js";
 import Employee from "../models/user/employee.model.js";
 import Admin from "../models/user/admin.model.js";
 import AppConfig from "../models/counter/AppConfig.js";
-import redis from "../config/redis.config.js";
-
 import LeaveTemporaryRole from "../models/leave/LeaveTemporaryRole.model.js";
+import {
+  extractToken,
+  clearAuthCookie,
+  verifyAuthToken,
+  isTokenBlacklisted,
+} from "../utility/authToken.utils.js";
+
+const syncEmployeeTemporaryRoles = async (employee) => {
+  const roleIdsSet = new Set((employee.role_ids || []).map(Number));
+  const tempRoleIdsSet = new Set((employee.temporary_role_ids || []).map(Number));
+  let effectiveActiveRoleId = employee.active_role_id;
+
+  const now = new Date();
+  const dueScheduled = await LeaveTemporaryRole.find({
+    interim_emp_id: employee.emp_id,
+    status: "SCHEDULED",
+    start_date: { $lte: now },
+    end_date: { $gte: now },
+  });
+
+  for (const sch of dueScheduled) {
+    sch.status = "ACTIVE";
+    await sch.save();
+    await Employee.updateOne(
+      { emp_id: employee.emp_id },
+      { $addToSet: { role_ids: sch.role_id, temporary_role_ids: sch.role_id } }
+    );
+    roleIdsSet.add(Number(sch.role_id));
+    tempRoleIdsSet.add(Number(sch.role_id));
+  }
+
+  const expiredActive = await LeaveTemporaryRole.find({
+    interim_emp_id: employee.emp_id,
+    status: "ACTIVE",
+    end_date: { $lt: now },
+  });
+
+  for (const exp of expiredActive) {
+    exp.status = "EXPIRED_AND_RESTORED";
+    await exp.save();
+
+    const expiredRoleId = Number(exp.role_id);
+    const isActiveExpired = Number(effectiveActiveRoleId) === expiredRoleId;
+    await Employee.updateOne(
+      { emp_id: employee.emp_id },
+      {
+        $pull: { role_ids: exp.role_id, temporary_role_ids: exp.role_id },
+        ...(isActiveExpired ? { $set: { active_role_id: null, active_role: null } } : {}),
+      }
+    );
+
+    roleIdsSet.delete(expiredRoleId);
+    tempRoleIdsSet.delete(expiredRoleId);
+    if (isActiveExpired) {
+      effectiveActiveRoleId = null;
+    }
+
+    if (exp.original_emp_id) {
+      await Employee.updateOne(
+        { emp_id: exp.original_emp_id },
+        { $addToSet: { role_ids: exp.role_id } }
+      );
+    }
+  }
+
+  const activeTempRoles = await LeaveTemporaryRole.find({
+    interim_emp_id: employee.emp_id,
+    status: "ACTIVE",
+  }).lean();
+
+  for (const tempRole of activeTempRoles) {
+    const roleId = Number(tempRole.role_id);
+    tempRoleIdsSet.add(roleId);
+    roleIdsSet.add(roleId);
+  }
+
+  return {
+    temporaryRoleIds: Array.from(tempRoleIdsSet),
+    effectiveRoleIds: Array.from(roleIdsSet),
+    effectiveActiveRoleId,
+  };
+};
+
+const authenticateAdmin = async (decoded, req, res, next) => {
+  if (!decoded.admin_id) {
+    clearAuthCookie(res, req);
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
+
+  const admin = await Admin.findOne({ admin_id: decoded.admin_id })
+    .select("-password -resetToken -resetTokenExpiry")
+    .lean();
+
+  if (!admin) {
+    clearAuthCookie(res, req);
+    return res.status(401).json({
+      success: false,
+      message: "Admin not found",
+    });
+  }
+
+  if (!admin.is_active) {
+    clearAuthCookie(res, req);
+    return res.status(403).json({
+      success: false,
+      message: "Admin account is inactive",
+    });
+  }
+
+  const isSuper =
+    !!admin.is_super_admin ||
+    (process.env.SUPER_ADMIN_EMAIL &&
+      admin.email?.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
+
+  req.user = {
+    admin_id: admin.admin_id,
+    email: admin.email,
+    isAdmin: true,
+    is_super_admin: isSuper,
+  };
+
+  return next();
+};
+
+const authenticateEmployee = async (decoded, req, res, next) => {
+  if (!decoded.emp_id) {
+    clearAuthCookie(res, req);
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
+
+  const employee = await Employee.findOne({ emp_id: decoded.emp_id })
+    .select("-password -resetToken -resetTokenExpiry")
+    .lean();
+
+  if (!employee) {
+    clearAuthCookie(res, req);
+    return res.status(401).json({
+      success: false,
+      message: "Employee not found",
+    });
+  }
+
+  if (!employee.is_active) {
+    clearAuthCookie(res, req);
+    return res.status(403).json({
+      success: false,
+      message: "Account is inactive",
+    });
+  }
+
+  const { temporaryRoleIds, effectiveRoleIds, effectiveActiveRoleId } =
+    await syncEmployeeTemporaryRoles(employee);
+
+  req.user = {
+    emp_id: employee.emp_id,
+    email: employee.email,
+    dept_id: employee.dept_id,
+    role_ids: effectiveRoleIds,
+    active_role_id: effectiveActiveRoleId,
+    temporary_role_ids: temporaryRoleIds,
+    isAdmin: false,
+  };
+
+  return next();
+};
 
 // ================= AUTHENTICATE =================
 export const authenticate = async (req, res, next) => {
+  const token = extractToken(req);
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: "Token required",
+    });
+  }
+
+  if (!env.JWT_SECRET) {
+    console.error("[Auth] JWT_SECRET is not configured");
+    return res.status(500).json({
+      success: false,
+      message: "Authentication configuration error",
+    });
+  }
+
+  let decoded;
   try {
-    const bearer =
-      req.headers.authorization && req.headers.authorization.startsWith("Bearer ")
-        ? req.headers.authorization.split(" ")[1]
-        : null;
-    const token = req.cookies?.token || bearer;
+    decoded = verifyAuthToken(token);
+  } catch (error) {
+    clearAuthCookie(res, req);
+    const message =
+      error?.name === "TokenExpiredError"
+        ? "Session expired. Please login again."
+        : "Invalid or expired token";
+    return res.status(401).json({
+      success: false,
+      message,
+    });
+  }
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "Token required",
-      });
-    }
-
-    // ✅ Blacklist check — logout hua token toh reject karo
-    const isBlacklisted = await redis.get(`blacklist:${token}`);
-    if (isBlacklisted) {
-      res.clearCookie("token", {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-      });
+  // Reject logged-out tokens without clearing valid sessions if Redis is unreachable
+  try {
+    const blacklisted = await isTokenBlacklisted(token);
+    if (blacklisted) {
+      clearAuthCookie(res, req);
       return res.status(401).json({
         success: false,
         message: "Session expired. Please login again.",
       });
     }
-
-    const decoded = jwt.verify(token, env.JWT_SECRET);
-
-    // ================= ADMIN =================
-    if (decoded.isAdmin) {
-      const admin = await Admin.findOne({ admin_id: decoded.admin_id });
-
-      if (!admin) {
-        return res.status(404).json({
-          success: false,
-          message: "Admin not found",
-        });
-      }
-
-      const isSuper =
-        !!admin.is_super_admin ||
-        (process.env.SUPER_ADMIN_EMAIL &&
-          admin.email?.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
-
-      req.user = {
-        admin_id: admin.admin_id,
-        email: admin.email,
-        isAdmin: true,
-        is_super_admin: isSuper,
-      };
-
-      return next();
-    }
-
-    // ================= EMPLOYEE =================
-    const employee = await Employee.findOne({
-      emp_id: decoded.emp_id,
-    });
-
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-      });
-    }
-
-    // Sync scheduled roles due to activate & active roles due to expire for this employee
-    const now = new Date();
-    const dueScheduled = await LeaveTemporaryRole.find({
-      interim_emp_id: employee.emp_id,
-      status: "SCHEDULED",
-      start_date: { $lte: now },
-      end_date: { $gte: now },
-    });
-    for (const sch of dueScheduled) {
-      sch.status = "ACTIVE";
-      await sch.save();
-      await Employee.updateOne(
-        { emp_id: employee.emp_id },
-        { $addToSet: { role_ids: sch.role_id, temporary_role_ids: sch.role_id } }
-      );
-    }
-
-    const expiredActive = await LeaveTemporaryRole.find({
-      interim_emp_id: employee.emp_id,
-      status: "ACTIVE",
-      end_date: { $lt: now },
-    });
-    for (const exp of expiredActive) {
-      exp.status = "EXPIRED_AND_RESTORED";
-      await exp.save();
-      await Employee.updateOne(
-        { emp_id: employee.emp_id },
-        { $pull: { role_ids: exp.role_id, temporary_role_ids: exp.role_id } }
-      );
-      if (exp.original_emp_id) {
-        await Employee.updateOne(
-          { emp_id: exp.original_emp_id },
-          { $addToSet: { role_ids: exp.role_id } }
-        );
-      }
-    }
-
-    const activeTempRoles = await LeaveTemporaryRole.find({
-      interim_emp_id: employee.emp_id,
-      status: "ACTIVE",
-    }).lean();
-    const temporaryRoleIds = Array.from(new Set([
-      ...(employee.temporary_role_ids || []).map(Number),
-      ...activeTempRoles.map((t) => Number(t.role_id)),
-    ]));
-    const effectiveRoleIds = Array.from(new Set([
-      ...(employee.role_ids || []).map(Number),
-      ...temporaryRoleIds,
-    ]));
-
-    req.user = {
-      emp_id: employee.emp_id,
-      dept_id: employee.dept_id,
-      role_ids: effectiveRoleIds,
-      active_role_id: employee.active_role_id,
-      temporary_role_ids: temporaryRoleIds,
-      isAdmin: false,
-    };
-
-    next();
-    // auth.middleware.js — existing catch block mein cookie bhi clear karo
   } catch (error) {
-    console.error("verify error:", error.message);
-
-    // ✅ Stale/expired token cookie bhi clear karo
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    });
-
-    return res.status(401).json({
+    console.error("[Auth] Redis blacklist check failed:", error.message);
+    return res.status(503).json({
       success: false,
-      message: "Invalid or expired token",
+      message: "Authentication service temporarily unavailable",
+    });
+  }
+
+  try {
+    if (decoded.isAdmin) {
+      return await authenticateAdmin(decoded, req, res, next);
+    }
+    return await authenticateEmployee(decoded, req, res, next);
+  } catch (error) {
+    console.error("[Auth] Middleware DB error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
     });
   }
 };
@@ -230,14 +317,24 @@ export const ensureNotTemporaryRole = (moduleName = "Notesheet") => (req, res, n
 export const verifyAdminSecret = (req, res, next) => {
   const secretKey = req.headers["x-admin-secret"];
 
-  if (!secretKey) {
+  if (typeof secretKey !== "string" || !secretKey) {
     return res.status(401).json({
       success: false,
       message: "Admin secret key required",
     });
   }
 
-  if (secretKey !== env.ADMIN_SECRET_KEY) {
+  if (!env.ADMIN_SECRET_KEY) {
+    return res.status(500).json({
+      success: false,
+      message: "Admin secret key not configured",
+    });
+  }
+
+  const provided = Buffer.from(secretKey, "utf8");
+  const expected = Buffer.from(env.ADMIN_SECRET_KEY, "utf8");
+
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
     return res.status(403).json({
       success: false,
       message: "Invalid admin secret key",

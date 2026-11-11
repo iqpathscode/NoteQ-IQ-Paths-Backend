@@ -1,6 +1,5 @@
-import jwt from "jsonwebtoken";
-import { env } from "../config/env.config.js";
 import Employee from "../models/user/employee.model.js";
+import { signAuthToken, setAuthCookie } from "../utility/authToken.utils.js";
 import Department from "../models/office/department.model.js";
 import Notesheet from "../models/notes/notesheet.model.js";
 import Role from "../models/userPowers/role.model.js";
@@ -571,27 +570,20 @@ export const switchEmployeeRole = async (req, res) => {
       employee.active_role = null;
       await employee.save();
 
-      const token = jwt.sign(
-        {
-          emp_id: employee.emp_id,
-          role_id: null,
-          dept_id: employee.dept_id,
-          isAdmin: employee.isAdmin || false,
-        },
-        env.JWT_SECRET,
-        { expiresIn: env.JWT_EXPIRES_IN },
-      );
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        sameSite: "strict",
-        secure: false, // change to true in production with HTTPS
+      const token = signAuthToken({
+        emp_id: employee.emp_id,
+        role_id: null,
+        dept_id: employee.dept_id,
+        isAdmin: employee.isAdmin || false,
       });
+
+      setAuthCookie(res, req, token);
 
       return res.json({
         success: true,
         message: "Switched to personal profile",
         active_role: null,
+        token,
       });
     }
 
@@ -645,27 +637,20 @@ export const switchEmployeeRole = async (req, res) => {
     await employee.save();
 
     //  Generate new token with updated role
-    const token = jwt.sign(
-      {
-        emp_id: employee.emp_id,
-        role_id: roleFromRoleTable.role_id,
-        dept_id: employee.dept_id,
-        isAdmin: employee.isAdmin || false,
-      },
-      env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN },
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      sameSite: "strict",
-      secure: false, // change to true in production with HTTPS
+    const token = signAuthToken({
+      emp_id: employee.emp_id,
+      role_id: roleFromRoleTable.role_id,
+      dept_id: employee.dept_id,
+      isAdmin: employee.isAdmin || false,
     });
+
+    setAuthCookie(res, req, token);
 
     res.json({
       success: true,
       message: "Role switched successfully",
       active_role: employee.active_role,
+      token,
     });
   } catch (error) {
     console.error("Error switching role:", error);

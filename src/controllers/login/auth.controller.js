@@ -1,19 +1,23 @@
-import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import Employee from "../../models/user/employee.model.js";
 import { env } from "../../config/env.config.js";
-import { generateEmpId } from "../../utility/generateEmpId.js";
 import Admin from "../../models/user/admin.model.js";
 import Power from "../../models/userPowers/power.model.js";
-import Department from "../../models/office/department.model.js";
 import Role from "../../models/userPowers/role.model.js";
 import LeaveTemporaryRole from "../../models/leave/LeaveTemporaryRole.model.js";
-import crypto from "crypto";
-import redis from "../../config/redis.config.js";
 import AppConfig from "../../models/counter/AppConfig.js";
+import { sendMail } from "../../utility/sendMail.js";
+import {
+  signAuthToken,
+  setAuthCookie,
+  clearAuthCookie,
+  extractAllTokens,
+  blacklistToken,
+} from "../../utility/authToken.utils.js";
 
-// ── Brevo sendMail utility (sgMail ki jagah) ─────────────────────────────────
-import { sendMail } from "../../utility/sendMail.js"; 
+const DEFAULT_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const REMEMBER_ME_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const login = async (req, res) => {
   try {
@@ -23,7 +27,11 @@ export const login = async (req, res) => {
       return res.status(400).json({ success: false, message: "Valid email and password are required" });
     }
 
-    const admin = await Admin.findOne({ email });
+    const normalizedEmail = email.trim().toLowerCase();
+    const tokenExpiry = rememberMe ? "7d" : env.JWT_EXPIRES_IN;
+    const cookieMaxAge = rememberMe ? REMEMBER_ME_COOKIE_MAX_AGE_MS : DEFAULT_COOKIE_MAX_AGE_MS;
+
+    const admin = await Admin.findOne({ email: normalizedEmail });
     if (admin) {
       if (!admin.is_active) {
         return res.status(403).json({ success: false, message: "Admin account is inactive" });
@@ -39,22 +47,15 @@ export const login = async (req, res) => {
         (process.env.SUPER_ADMIN_EMAIL &&
           admin.email?.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
 
-      const token = jwt.sign(
+      const token = signAuthToken(
         { admin_id: admin.admin_id, isAdmin: true, is_super_admin: isSuper },
-        env.JWT_SECRET,
-        { expiresIn: env.JWT_EXPIRES_IN },
+        tokenExpiry,
       );
 
       admin.last_login = new Date();
       await admin.save();
 
-      const isProduction = process.env.NODE_ENV === "production";
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? "none" : "lax",
-        maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
-      });
+      setAuthCookie(res, req, token, cookieMaxAge);
 
       const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
       const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
@@ -70,7 +71,7 @@ export const login = async (req, res) => {
       });
     }
 
-    const user = await Employee.findOne({ email });
+    const user = await Employee.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
@@ -84,29 +85,22 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = jwt.sign(
+    const token = signAuthToken(
       {
         emp_id: user.emp_id,
         role_id: user.active_role?.role_id || 0,
         dept_id: user.dept_id || 0,
         isAdmin: false,
       },
-      env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN },
+      tokenExpiry,
     );
 
     user.last_login = new Date();
     await user.save();
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-    });
+    setAuthCookie(res, req, token, cookieMaxAge);
 
     const isDefaultPassword = await bcrypt.compare("iqpaths@123", user.password);
-
-    const rolePower = await Power.findOne({ power_id: user.active_role?.power_id });
 
     const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
     const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
@@ -124,7 +118,8 @@ export const login = async (req, res) => {
       modules,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Login failed", error: error.message });
+    console.error("Login error:", error.message);
+    return res.status(500).json({ success: false, message: "Login failed" });
   }
 };
 
@@ -132,7 +127,17 @@ export const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
 
-    const user = await Employee.findOne({ emp_id: req.user.emp_id });
+    if (typeof oldPassword !== "string" || !oldPassword || typeof newPassword !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Old password and new password are required",
+      });
+    }
+
+    const user = req.user?.isAdmin
+      ? await Admin.findOne({ admin_id: req.user.admin_id })
+      : await Employee.findOne({ emp_id: req.user?.emp_id });
+
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
@@ -155,12 +160,15 @@ export const changePassword = async (req, res) => {
     }
 
     user.password = await bcrypt.hash(newPassword, 10);
-    user.isDefaultPassword = false;
+    if (!req.user?.isAdmin) {
+      user.isDefaultPassword = false;
+    }
     await user.save();
 
-    res.status(200).json({ success: true, message: "Password changed successfully" });
+    return res.status(200).json({ success: true, message: "Password changed successfully" });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Password change failed", error: error.message });
+    console.error("Change password error:", error.message);
+    return res.status(500).json({ success: false, message: "Password change failed" });
   }
 };
 
@@ -171,10 +179,16 @@ export const getMe = async (req, res) => {
     }
 
     if (req.user.isAdmin) {
-      const admin = await Admin.findOne({ admin_id: req.user.admin_id });
+      const admin = await Admin.findOne({ admin_id: req.user.admin_id })
+        .select("-password -resetToken -resetTokenExpiry")
+        .lean();
       if (!admin) {
         return res.status(404).json({ success: false, message: "Admin not found" });
       }
+      if (!admin.is_active) {
+        return res.status(403).json({ success: false, message: "Admin account is inactive" });
+      }
+
       const isSuper =
         !!admin.is_super_admin ||
         (process.env.SUPER_ADMIN_EMAIL &&
@@ -198,9 +212,14 @@ export const getMe = async (req, res) => {
       });
     }
 
-    const employee = await Employee.findOne({ emp_id: req.user.emp_id });
+    const employee = await Employee.findOne({ emp_id: req.user.emp_id })
+      .select("-password -resetToken -resetTokenExpiry")
+      .lean();
     if (!employee) {
       return res.status(404).json({ success: false, message: "Employee not found" });
+    }
+    if (!employee.is_active) {
+      return res.status(403).json({ success: false, message: "Account is inactive" });
     }
 
     const roles = await Role.find({ role_id: { $in: employee.role_ids || [] } }).lean();
@@ -268,70 +287,65 @@ export const getMe = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getMe:", error.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
 export const logout = async (req, res) => {
   try {
-    const token = req.cookies.token;
-
-    if (token) {
-      const decoded = jwt.decode(token);
-      const expirySeconds = decoded.exp - Math.floor(Date.now() / 1000);
-      if (expirySeconds > 0) {
-        await redis.setex(`blacklist:${token}`, expirySeconds, "true");
-      }
-    }
-
-    const isProduction = process.env.NODE_ENV === "production";
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
-    });
-
-    return res.status(200).json({ success: true, message: "Logged out successfully" });
+    const tokens = extractAllTokens(req);
+    await Promise.all(tokens.map((t) => blacklistToken(t)));
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Logout failed" });
+    console.error("Logout blacklist error:", error.message);
+  } finally {
+    clearAuthCookie(res, req);
   }
+
+  return res.status(200).json({ success: true, message: "Logged out successfully" });
 };
 
 export const forgotPassword = async (req, res) => {
-  const { email } = req.body;
-
-  if (typeof email !== "string" || !email.trim()) {
-    return res.status(400).json({ message: "Valid email is required" });
-  }
-
-  let user = await Employee.findOne({ email });
-  let userType = "employee";
-
-  if (!user) {
-    user = await Admin.findOne({ email });
-    userType = "admin";
-  }
-
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
-
-  const resetToken = crypto.randomBytes(32).toString("hex");
-  const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-
-  user.resetToken = hashedToken;
-  user.resetTokenExpiry = Date.now() + 3600000;
-  await user.save();
-
-  const resetURL = `${env.FRONTEND_URL}/reset-password/${resetToken}?type=${userType}`;
-
   try {
-    // ── Brevo se email bhejo ──────────────────────────────────────────────────
-    await sendMail({
-      to:      user.email,
-      name:    user.emp_name || user.admin_name || "User",
-      subject: "Reset Your Password - IQ Paths",
-      html: `
+    const { email } = req.body;
+
+    if (typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({ success: false, message: "Valid email is required" });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    let user = await Employee.findOne({ email: normalizedEmail });
+    let userType = "employee";
+
+    if (!user) {
+      user = await Admin.findOne({ email: normalizedEmail });
+      userType = "admin";
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.is_active === false) {
+      return res.status(403).json({ success: false, message: "Account is inactive" });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+    user.resetToken = hashedToken;
+    user.resetTokenExpiry = Date.now() + 3600000;
+    await user.save();
+
+    const resetURL = `${env.FRONTEND_URL}/reset-password/${resetToken}?type=${userType}`;
+
+    try {
+      // ── Brevo se email bhejo ──────────────────────────────────────────────────
+      await sendMail({
+        to:      user.email,
+        name:    user.emp_name || user.admin_name || "User",
+        subject: "Reset Your Password - IQ Paths",
+        html: `
   <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 20px;">
     <div style="max-width: 600px; margin: auto; background: #ffffff; padding: 30px; border-radius: 10px;">
 
@@ -375,60 +389,79 @@ export const forgotPassword = async (req, res) => {
     </div>
   </div>
       `,
-    });
+      });
 
-    res.status(200).json({ message: "Reset link sent to email" });
-  } catch (err) {
-    console.error("Email send error:", err);
-    user.resetToken = undefined;
-    user.resetTokenExpiry = undefined;
-    await user.save();
-    res.status(500).json({ message: "Failed to send email" });
+      return res.status(200).json({ success: true, message: "Reset link sent to email" });
+    } catch (err) {
+      console.error("Email send error:", err);
+      user.resetToken = undefined;
+      user.resetTokenExpiry = undefined;
+      await user.save();
+      return res.status(500).json({ success: false, message: "Failed to send email" });
+    }
+  } catch (error) {
+    console.error("Forgot password error:", error.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
 export const resetPassword = async (req, res) => {
-  const { token } = req.params;
-  const { newPassword } = req.body;
-  const { type } = req.query;
+  try {
+    const { token } = req.params;
+    const { newPassword } = req.body;
+    const { type } = req.query;
 
-  if (!newPassword) {
-    return res.status(400).json({ message: "New password is required" });
+    if (typeof token !== "string" || !token.trim()) {
+      return res.status(400).json({ success: false, message: "Reset token is required" });
+    }
+
+    if (typeof newPassword !== "string" || !newPassword.trim()) {
+      return res.status(400).json({ success: false, message: "New password is required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    const normalizedType = type?.toLowerCase()?.trim();
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    let user;
+
+    if (normalizedType === "admin") {
+      user = await Admin.findOne({
+        resetToken: hashedToken,
+        resetTokenExpiry: { $gt: Date.now() },
+      });
+    } else if (normalizedType === "employee") {
+      user = await Employee.findOne({
+        resetToken: hashedToken,
+        resetTokenExpiry: { $gt: Date.now() },
+      });
+    }
+
+    if (!user) {
+      user =
+        (await Admin.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: Date.now() } })) ||
+        (await Employee.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: Date.now() } }));
+    }
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid or expired link" });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    if ("isDefaultPassword" in user) {
+      user.isDefaultPassword = false;
+    }
+
+    await user.save();
+
+    return res.status(200).json({ success: true, message: "Password reset successful" });
+  } catch (error) {
+    console.error("Reset password error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to reset password" });
   }
-
-  const normalizedType = type?.toLowerCase()?.trim();
-
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-  let user;
-
-  if (normalizedType === "admin") {
-    user = await Admin.findOne({
-      resetToken: hashedToken,
-      resetTokenExpiry: { $gt: Date.now() },
-    });
-  } else if (normalizedType === "employee") {
-    user = await Employee.findOne({
-      resetToken: hashedToken,
-      resetTokenExpiry: { $gt: Date.now() },
-    });
-  }
-
-  if (!user) {
-    user =
-      (await Admin.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: Date.now() } })) ||
-      (await Employee.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: Date.now() } }));
-  }
-
-  if (!user) {
-    return res.status(400).json({ message: "Invalid or expired link" });
-  }
-
-  user.password = await bcrypt.hash(newPassword, 10);
-  user.resetToken = undefined;
-  user.resetTokenExpiry = undefined;
-
-  await user.save();
-
-  res.status(200).json({ message: "Password reset successful" });
 };
