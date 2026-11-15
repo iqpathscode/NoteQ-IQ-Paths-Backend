@@ -24,6 +24,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "https://intellect-quest-paths-yc7m.vercel.app",
+  "https://noteq.iqpaths.com"
 ];
 
 app.use(
