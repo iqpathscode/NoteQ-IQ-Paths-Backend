@@ -16,6 +16,8 @@ import downloadRoutes from "./src/routes/download.routes.js";
 import leaveRoutes from "./src/routes/leave.routes.js";
 import holidayRoutes from "./src/routes/holiday.routes.js";
 import hrmsManageRoutes from "./src/routes/hrmsManage.routes.js";
+import nocRoutes from "./src/routes/noc.routes.js";
+import purchaseOrderRoutes from "./src/routes/purchaseOrder.routes.js";
 import { errorHandler } from "./src/middlewares/errorHandler.js";
 
 const app = express();
@@ -58,6 +60,8 @@ app.use("/api/downloads", downloadRoutes);
 app.use("/api/leave", requireModule("leave"), leaveRoutes);
 app.use("/api/holidays", requireModule("leave"), holidayRoutes);
 app.use("/api/hrms", requireModule("leave"), hrmsManageRoutes);
+app.use("/api/noc", nocRoutes);
+app.use("/api/po", purchaseOrderRoutes);
 app.set("trust proxy", 1);
 
 app.get("/test", (req, res) => {

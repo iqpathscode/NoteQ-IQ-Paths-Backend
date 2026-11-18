@@ -26,6 +26,46 @@ const DEFAULT_CATEGORIES = [
 
 const DEFAULT_APP_CATEGORIES = [];
 
+export const DEFAULT_ORG_CONFIG = {
+  // 1. Organization & Legal Identifiers
+  org_name: "Medi-Caps University",
+  org_legal_name: "MEDICAPS UNIVERSITY, INDORE",
+  org_subtitle: "(Recognized by UGC under Section 2(f) & NAAC Accredited Autonomous Institution)",
+  org_address: "A.B. Road, Pigdamber, Rau, Indore, Madhya Pradesh - 453331",
+  org_contact_email: "registrar@medicaps.ac.in",
+  org_contact_phone: "+91-731-3111150",
+  org_website: "www.medicaps.ac.in",
+  org_gstin: "23AAAAU0000A1Z2",
+  org_pan: "AAAAU0000A",
+  org_logo_url: "",
+
+  // 2. NOC Desk Format Template
+  noc_format: {
+    section_title: "Office of the Registrar",
+    portal_header: "MEDICAPS UNIVERSITY ACADEMIC & ADMINISTRATIVE PORTAL",
+    accreditation_text: "(Recognized by UGC under Section 2(f) & NAAC Accredited Autonomous Institution)",
+    watermark_text: "MEDICAPS",
+    issuing_authority_title: "Registrar",
+    contact_email: "registrar@medicaps.ac.in",
+    declaration_text: "The Institute and the Office of the Registrar have No Objection to the candidate undertaking / participating in the specified activity.",
+  },
+
+  // 3. Purchase Order (PO) Format Template & Standard Terms
+  po_format: {
+    section_title: "Central Procurement & Store Section",
+    portal_header: "MEDICAPS UNIVERSITY ACADEMIC & ADMINISTRATIVE PORTAL",
+    contact_email: "purchase@medicaps.ac.in",
+    delivery_location: "Central Store, Academic Block-B, Medi-Caps Campus",
+    payment_terms: "100% payment within 30 days after satisfactory delivery and physical inspection.",
+    terms_and_conditions: [
+      "Material must strictly match technical specifications approved by the University.",
+      "A penalty of 0.5% per week of delay will be levied, up to a maximum of 5% of order value.",
+      "Delivery and installation must be carried out during official university working hours.",
+      "Warranty obligations shall commence strictly from the date of final inspection and sign-off.",
+    ],
+  },
+};
+
 // ─── Helper: fetch config doc, seed if not found ──────────────────────────────
 const getOrCreateConfig = async () => {
   let doc = await AppConfig.findOne({ key: CONFIG_KEY });
@@ -48,6 +88,19 @@ export const getAppConfig = async (req, res) => {
 
     const loginPage = { ...DEFAULT_LOGIN_CONFIG, ...doc.value };
 
+    const orgConfig = {
+      ...DEFAULT_ORG_CONFIG,
+      ...(doc.value?.org_config || {}),
+      noc_format: {
+        ...DEFAULT_ORG_CONFIG.noc_format,
+        ...(doc.value?.org_config?.noc_format || {}),
+      },
+      po_format: {
+        ...DEFAULT_ORG_CONFIG.po_format,
+        ...(doc.value?.org_config?.po_format || {}),
+      },
+    };
+
     const categories = (doc.categories || [])
       .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
       .map((c) => ({ id: c._id, name: c.name, is_active: c.isActive }));
@@ -60,7 +113,7 @@ export const getAppConfig = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: { login_page: loginPage, categories, app_categories, modules },
+      data: { login_page: loginPage, org_config: orgConfig, categories, app_categories, modules },
     });
   } catch (error) {
     console.error("getAppConfig error:", error);
@@ -102,6 +155,51 @@ export const updateLoginConfig = async (req, res) => {
   } catch (error) {
     console.error("updateLoginConfig error:", error);
     return res.status(500).json({ success: false, message: "Error updating config" });
+  }
+};
+
+// ─── PUT /api/admin/app-config/document-formats ──────────────────────────────
+export const updateDocumentFormats = async (req, res) => {
+  try {
+    const incomingOrg = req.body || {};
+    const doc = await getOrCreateConfig();
+
+    const currentOrg = doc.value?.org_config || {};
+    const updatedOrg = {
+      ...DEFAULT_ORG_CONFIG,
+      ...currentOrg,
+      ...incomingOrg,
+      noc_format: {
+        ...DEFAULT_ORG_CONFIG.noc_format,
+        ...(currentOrg.noc_format || {}),
+        ...(incomingOrg.noc_format || {}),
+      },
+      po_format: {
+        ...DEFAULT_ORG_CONFIG.po_format,
+        ...(currentOrg.po_format || {}),
+        ...(incomingOrg.po_format || {}),
+      },
+    };
+
+    const mergedValue = {
+      ...(doc.value || {}),
+      org_config: updatedOrg,
+    };
+
+    const updated = await AppConfig.findOneAndUpdate(
+      { key: CONFIG_KEY },
+      { $set: { value: mergedValue } },
+      { returnDocument: "after" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization & Document Formats (NOC/PO) updated successfully",
+      data: updated.value?.org_config,
+    });
+  } catch (error) {
+    console.error("updateDocumentFormats error:", error);
+    return res.status(500).json({ success: false, message: "Error updating document formats" });
   }
 };
 

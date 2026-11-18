@@ -29,9 +29,13 @@ export const sendMail = async ({ to, subject, html, name = "" }) => {
 
     console.log("MAIL SENT SUCCESS");
     console.log("Status:", response?.response?.statusCode);
+    return { success: true, data: response };
 
   } catch (error) {
     console.log("========== MAIL ERROR ==========");
-    console.log(JSON.stringify(error.response?.body || error, null, 2));
+    const errorBody = error.response?.body || error;
+    console.log(JSON.stringify(errorBody, null, 2));
+    const errMsg = errorBody?.message || error.message || "Failed to send email via Brevo";
+    return { success: false, error: errMsg, details: errorBody };
   }
 };

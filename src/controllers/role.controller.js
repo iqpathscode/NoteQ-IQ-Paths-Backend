@@ -339,6 +339,93 @@ export const updateDeptOfRole = async (req, res) => {
   }
 };
 
+export const updateRole = async (req, res) => {
+  try {
+    const roleId = Number(req.params.id || req.body.role_id);
+
+    if (!roleId) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid Role ID is required",
+      });
+    }
+
+    const role = await Role.findOne({ role_id: roleId });
+
+    if (!role) {
+      return res.status(404).json({
+        success: false,
+        message: "Role not found",
+      });
+    }
+
+    let {
+      role_name,
+      canReceiveNotesheet,
+      canReceiveLeaveRequest,
+      dept_ids,
+      view_scope,
+      view_dept_ids,
+      app_view_scope,
+      app_view_dept_ids,
+    } = req.body;
+
+    if (role_name !== undefined) {
+      role_name = role_name?.trim();
+      if (!role_name) {
+        return res.status(400).json({
+          success: false,
+          message: "Role name cannot be empty",
+        });
+      }
+      role.role_name = role_name;
+    }
+
+    if (canReceiveNotesheet !== undefined) {
+      role.canReceiveNotesheet = Boolean(canReceiveNotesheet);
+    }
+
+    if (canReceiveLeaveRequest !== undefined) {
+      role.canReceiveLeaveRequest = Boolean(canReceiveLeaveRequest);
+    }
+
+    if (dept_ids !== undefined && Array.isArray(dept_ids)) {
+      role.dept_ids = dept_ids.map(Number);
+    }
+
+    if (view_scope !== undefined) {
+      role.view_scope = view_scope;
+    }
+
+    if (view_dept_ids !== undefined && Array.isArray(view_dept_ids)) {
+      role.view_dept_ids = view_dept_ids.map(Number);
+    }
+
+    if (app_view_scope !== undefined) {
+      role.app_view_scope = app_view_scope;
+    }
+
+    if (app_view_dept_ids !== undefined && Array.isArray(app_view_dept_ids)) {
+      role.app_view_dept_ids = app_view_dept_ids.map(Number);
+    }
+
+    await role.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Role updated successfully!",
+      data: role,
+    });
+  } catch (error) {
+    console.error("Update Role Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error updating role",
+      error: error.message,
+    });
+  }
+};
+
 export const deleteRole = async (req, res) => {
   try {
     const { id } = req.params;

@@ -3,6 +3,7 @@ import express from "express";
 import {
   getAppConfig,
   updateLoginConfig,
+  updateDocumentFormats,
   uploadCampusImage,
   addCategory,
   updateCategory,
@@ -31,6 +32,7 @@ router.get("/", getAppConfig);
 
 // ─── Admin only ───────────────────────────────────────────────────────────────
 router.put("/", authenticate, isAdmin, updateLoginConfig);
+router.put("/document-formats", authenticate, isAdmin, updateDocumentFormats);
 
 // ─── Super Admin only (Licensing / Modules Toggle) ───────────────────────────
 router.put("/modules", authenticate, isAdmin, isSuperAdmin, updateModulesConfig);

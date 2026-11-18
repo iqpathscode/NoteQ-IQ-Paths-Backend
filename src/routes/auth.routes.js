@@ -54,7 +54,8 @@ import {
   // assignDeptToRole,
   updateDeptOfRole,
   deleteRole,
-  getRoleAssignedEmployee
+  getRoleAssignedEmployee,
+  updateRole,
 } from "../controllers/role.controller.js";
 
 // Power
@@ -167,9 +168,12 @@ router.delete("/power/:id", authenticate, isAdmin, deletePower);
 
 
 // ======================== ROLE ========================
+router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.post("/role", authenticate, isAdmin, createRole);
 router.get("/role", authenticate, getAllRoles);
 router.get("/roles/eligible", authenticate, getEligibleRoles);
+router.put("/role/:id", authenticate, isAdmin, updateRole);
+router.put("/role", authenticate, isAdmin, updateRole);
 router.delete("/role/:id", authenticate, isAdmin, deleteRole);
 router.get("/role/:role_id/assigned-employee", authenticate, getRoleAssignedEmployee);
 router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);
@@ -177,7 +181,6 @@ router.post("/assign-role", authenticate, isAdmin, assignRoleToFaculty);
 
 
 router.put("/update-dept-role", authenticate, isAdmin, updateDeptOfRole);
-router.put("/role/switch-role", authenticate, switchEmployeeRole);
 router.put("/transfer-role", authenticate, transferRole);
 router.get("/profile", authenticate, getProfile);
 router.put("/update-profile", authenticate, upload.single("signature"), updateProfile);

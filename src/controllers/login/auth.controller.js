@@ -273,6 +273,7 @@ export const getMe = async (req, res) => {
       user: {
         emp_id:             employee.emp_id,
         emp_name:           employee.emp_name,
+        designation:        employee.designation,
         dept_id:            employee.dept_id,
         isAdmin:            false,
         isDefaultPassword:  employee.isDefaultPassword ?? true,
