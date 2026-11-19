@@ -1,5 +1,6 @@
 // controllers/appConfigController.js
 import AppConfig from "../models/counter/AppConfig.js";
+import { getCache, setCache, deleteCache } from "../utility/cache.utils.js";
 
 // ─── Single document key ──────────────────────────────────────────────────────
 const CONFIG_KEY = "app_config";
@@ -84,6 +85,15 @@ const getOrCreateConfig = async () => {
 // ─── GET /api/admin/app-config ────────────────────────────────────────────────
 export const getAppConfig = async (req, res) => {
   try {
+    const cacheKey = "app_config:global";
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.status(200).json({
+        success: true,
+        data: cached,
+      });
+    }
+
     const doc = await getOrCreateConfig();
 
     const loginPage = { ...DEFAULT_LOGIN_CONFIG, ...doc.value };
@@ -111,9 +121,12 @@ export const getAppConfig = async (req, res) => {
 
     const modules = doc.modules || { notesheet: true, application: true, leave: true };
 
+    const payload = { login_page: loginPage, org_config: orgConfig, categories, app_categories, modules };
+    await setCache(cacheKey, payload, 3600);
+
     return res.status(200).json({
       success: true,
-      data: { login_page: loginPage, org_config: orgConfig, categories, app_categories, modules },
+      data: payload,
     });
   } catch (error) {
     console.error("getAppConfig error:", error);

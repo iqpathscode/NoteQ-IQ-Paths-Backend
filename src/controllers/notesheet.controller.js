@@ -143,9 +143,16 @@ export const notesheetViewPipeline = (matchStage = null) => {
 
 export const getAllNotesheets = async (req, res) => {
   try {
-     const notesheets = await Notesheet.aggregate(
-      notesheetViewPipeline({ $match: { is_deleted: { $ne: true } } })
-    );
+    const limit = req.query.limit ? Number(req.query.limit) : 0;
+    const page = Math.max(1, req.query.page ? Number(req.query.page) : 1);
+
+    const pipeline = notesheetViewPipeline({ $match: { is_deleted: { $ne: true } } });
+    if (limit > 0) {
+      pipeline.push({ $skip: (page - 1) * limit });
+      pipeline.push({ $limit: limit });
+    }
+
+    const notesheets = await Notesheet.aggregate(pipeline);
 
     return res.status(200).json({
       success: true,
@@ -198,9 +205,18 @@ export const getNotesheetsForEmployee = async (req, res) => {
     }
 
     //  Get notesheets
-    const notesheets = await Notesheet.find(query)
-      .sort({ createdAt: -1 })
-      .lean();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Number(req.query.limit) || 0;
+
+    let notesheetsQuery = Notesheet.find(query)
+      .select("-description -attachments -attachmentRequests")
+      .sort({ createdAt: -1 });
+
+    if (limit > 0) {
+      notesheetsQuery = notesheetsQuery.skip((page - 1) * limit).limit(limit);
+    }
+
+    const notesheets = await notesheetsQuery.lean();
 
     if (!notesheets.length) {
       return res.status(200).json({
@@ -567,6 +583,7 @@ export const getRecentNotesheets = async (req, res) => {
     }
 
     const recentNotes = await Notesheet.find(filter)
+      .select("note_id subject status priority category createdAt mode level dept_id")
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
@@ -666,16 +683,29 @@ export const getAllNotesheetsByScope = async (req, res) => {
       filter = {};
     }
 
-    const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } }).sort({ createdAt: -1 });
+    const notesheets = await Notesheet.find({ ...filter, is_deleted: { $ne: true } })
+      .select("-description -attachmentRequests")
+      .sort({ createdAt: -1 })
+      .lean();
 
     const noteIds = notesheets.map((n) => n.note_id);
 
     const allFlows = await NotesheetFlow.find({
       note_id: { $in: noteIds },
-    }).sort({ createdAt: 1 });
+    })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const flowByNoteId = new Map();
+    allFlows.forEach((flow) => {
+      if (!flowByNoteId.has(flow.note_id)) {
+        flowByNoteId.set(flow.note_id, []);
+      }
+      flowByNoteId.get(flow.note_id).push(flow);
+    });
 
     const processedNotesheets = notesheets.map((note) => {
-      let flow = allFlows.filter((f) => f.note_id === note.note_id);
+      let flow = flowByNoteId.get(note.note_id) || [];
 
       flow = flow.filter(
         (item) =>
@@ -685,7 +715,7 @@ export const getAllNotesheetsByScope = async (req, res) => {
       const currentStep = flow.find((item) => item.final_status === "PENDING");
 
       return {
-        ...note.toObject(),
+        ...note,
         flow,
         current_step: currentStep || null,
       };

@@ -153,13 +153,19 @@ export const getAllNOCs = async (req, res) => {
       query.status = status.toUpperCase();
     }
 
-    if (search) {
+    if (search && search.trim()) {
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { noc_number: { $regex: search, $options: "i" } },
-        { recipient_name: { $regex: search, $options: "i" } },
-        { recipient_id: { $regex: search, $options: "i" } },
-        { organization_name: { $regex: search, $options: "i" } },
-        { department_name: { $regex: search, $options: "i" } },
+        { noc_number: { $regex: safeSearch, $options: "i" } },
+        { recipient_name: { $regex: safeSearch, $options: "i" } },
+        { recipient_id: { $regex: safeSearch, $options: "i" } },
+        { recipient_type: { $regex: safeSearch, $options: "i" } },
+        { recipient_email: { $regex: safeSearch, $options: "i" } },
+        { recipient_phone: { $regex: safeSearch, $options: "i" } },
+        { organization_name: { $regex: safeSearch, $options: "i" } },
+        { department_name: { $regex: safeSearch, $options: "i" } },
+        { designation_or_course: { $regex: safeSearch, $options: "i" } },
+        { purpose: { $regex: safeSearch, $options: "i" } },
       ];
     }
 

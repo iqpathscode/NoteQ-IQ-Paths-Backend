@@ -956,9 +956,18 @@ export const getProcessedNotesheets = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    const stepsByNoteId = new Map();
+    allSteps.forEach((s) => {
+      const key = String(s.note_id);
+      if (!stepsByNoteId.has(key)) {
+        stepsByNoteId.set(key, []);
+      }
+      stepsByNoteId.get(key).push(s);
+    });
+
     const history = notesheets.map((note) => {
-      const steps = allSteps
-        .filter((s) => String(s.note_id) === String(note.note_id))
+      const noteSteps = stepsByNoteId.get(String(note.note_id)) || [];
+      const steps = noteSteps
         .map((s) => ({
           action: s.action,
           byEmpId: s.from_emp_id,

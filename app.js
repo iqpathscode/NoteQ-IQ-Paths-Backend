@@ -19,8 +19,11 @@ import hrmsManageRoutes from "./src/routes/hrmsManage.routes.js";
 import nocRoutes from "./src/routes/noc.routes.js";
 import purchaseOrderRoutes from "./src/routes/purchaseOrder.routes.js";
 import { errorHandler } from "./src/middlewares/errorHandler.js";
+import compression from "compression";
 
 const app = express();
+
+app.use(compression());
 
 // middleware
 const allowedOrigins = [

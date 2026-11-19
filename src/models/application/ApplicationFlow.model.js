@@ -65,5 +65,11 @@ const applicationFlowSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Performance Indexes for lookups, aggregations and history fetching
+applicationFlowSchema.index({ application_id: 1, createdAt: 1 });
+applicationFlowSchema.index({ from_role_id: 1, from_emp_id: 1, createdAt: 1 });
+applicationFlowSchema.index({ from_emp_id: 1, action: 1 });
+applicationFlowSchema.index({ application_id: 1, final_status: 1 });
+
 const ApplicationFlow = mongoose.model("ApplicationFlow", applicationFlowSchema);
 export default ApplicationFlow;

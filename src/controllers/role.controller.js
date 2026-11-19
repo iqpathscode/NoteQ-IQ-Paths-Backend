@@ -4,6 +4,7 @@ import { Counter } from "../models/counter/counter.model.js";
 import  Department  from "../models/office/department.model.js";
 import Power from "../models/userPowers/power.model.js";
 import Employee from "../models/user/employee.model.js";
+import { getCache, setCache } from "../utility/cache.utils.js";
 
 export const createRole = async (req, res) => {
   try {
@@ -255,6 +256,16 @@ export const createRole = async (req, res) => {
 
 export const getAllRoles = async (req, res) => {
   try {
+    const cacheKey = "roles:all";
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.status(200).json({
+        success: true,
+        count: cached.length,
+        data: cached,
+      });
+    }
+
     const [roles, powers] = await Promise.all([
       Role.find().sort({ power_id: 1 }).lean(),
       Power.find().lean(),
@@ -270,6 +281,8 @@ export const getAllRoles = async (req, res) => {
       power_type: powerMap[role.power_id]?.power_type || null,
       scope: powerMap[role.power_id]?.scope || null,
     }));
+
+    await setCache(cacheKey, enrichedRoles, 1800);
 
     return res.status(200).json({
       success: true,

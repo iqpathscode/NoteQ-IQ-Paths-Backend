@@ -196,11 +196,23 @@ export const getCombinedDashboardData = async (req, res) => {
     const isLeaveEnabled = modules.leave !== false;
 
     const [departments, employees, notesheets, applications, leaves] = await Promise.all([
-      Department.find({}).lean(),
+      Department.find({}, { dept_id: 1, dept_name: 1 }).lean(),
       Employee.find({}, { emp_id: 1, emp_name: 1 }).lean(),
-      isNotesheetEnabled ? Notesheet.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
-      isApplicationEnabled ? Application.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
-      isLeaveEnabled ? LeaveRequest.find({ is_deleted: { $ne: true } }).lean() : Promise.resolve([]),
+      isNotesheetEnabled
+        ? Notesheet.find({ is_deleted: { $ne: true } })
+            .select("note_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id created_by_emp_id subject")
+            .lean()
+        : Promise.resolve([]),
+      isApplicationEnabled
+        ? Application.find({ is_deleted: { $ne: true } })
+            .select("application_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id created_by_emp_id subject")
+            .lean()
+        : Promise.resolve([]),
+      isLeaveEnabled
+        ? LeaveRequest.find({ is_deleted: { $ne: true } })
+            .select("leave_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id reason")
+            .lean()
+        : Promise.resolve([]),
     ]);
 
     const departmentsById = new Map(departments.map((dept) => [dept.dept_id, dept.dept_name]));

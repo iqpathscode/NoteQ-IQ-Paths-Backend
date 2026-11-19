@@ -93,6 +93,12 @@ const applicationSchema = new mongoose.Schema(
 
 applicationSchema.index({ dept_id: 1, status: 1 });
 applicationSchema.index({ application_id: 1, level: 1 });
+applicationSchema.index({ created_by_emp_id: 1, created_by_role_id: 1, is_deleted: 1, status: 1 });
+applicationSchema.index({ created_by_emp_id: 1, is_deleted: 1, createdAt: -1 });
+applicationSchema.index({ created_by_role_id: 1, is_deleted: 1, createdAt: -1 });
+applicationSchema.index({ forward_to_role_id: 1, status: 1, is_deleted: 1, createdAt: -1 });
+applicationSchema.index({ forward_to_dept_id: 1, status: 1, is_deleted: 1 });
+applicationSchema.index({ is_deleted: 1, createdAt: -1 });
 
 const Application = mongoose.model("Application", applicationSchema);
 
