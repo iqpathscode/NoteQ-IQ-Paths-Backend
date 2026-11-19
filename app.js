@@ -28,14 +28,19 @@ app.use(compression());
 // middleware
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://localhost:3000",
   "https://intellect-quest-paths-yc7m.vercel.app",
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.replace(/\/+$/, "")] : []),
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
+      if (
+        allowedOrigins.includes(origin) ||
+        /\.vercel\.app$/.test(origin)
+      ) {
         return callback(null, true);
       } else {
         return callback(new Error("Not allowed by CORS"));

@@ -15,12 +15,13 @@ export const isRegistrar = async (req, res, next) => {
       });
     }
 
-    // Allow Super Admin bypass for testing / administration
-    if (req.user.isAdmin && req.user.is_super_admin) {
+    // Allow Admin / Super Admin bypass for management and administration
+    if (req.user.isAdmin) {
       req.registrar = {
         emp_id: 0,
-        emp_name: "Super Admin",
+        emp_name: req.user.name || "University Admin",
         designation: "Registrar (Authorized Admin)",
+        signature: null,
       };
       return next();
     }
@@ -34,11 +35,15 @@ export const isRegistrar = async (req, res, next) => {
         });
       }
 
-      // Check current active role strictly (Role Isolation)
-      const currentActiveRoleId = req.user.active_role_id ?? employee.active_role_id;
+      // 1. Check if base designation is Registrar
+      if (employee.designation && /registrar/i.test(employee.designation)) {
+        req.registrar = employee;
+        return next();
+      }
 
+      // 2. Check current active role strictly
+      const currentActiveRoleId = req.user.active_role_id ?? employee.active_role_id;
       if (currentActiveRoleId) {
-        // If an active role is selected (e.g. VC, Dean, Registrar), verify THAT active role
         const activeRoleDoc = await Role.findOne({
           role_id: Number(currentActiveRoleId),
         }).lean();
@@ -47,9 +52,15 @@ export const isRegistrar = async (req, res, next) => {
           req.registrar = employee;
           return next();
         }
-      } else {
-        // If no active role selected (operating in personal profile), check base designation
-        if (employee.designation && /registrar/i.test(employee.designation)) {
+      }
+
+      // 3. Fallback: Check if employee holds ANY assigned role with "registrar"
+      if (Array.isArray(employee.role_ids) && employee.role_ids.length > 0) {
+        const employeeRoles = await Role.find({
+          role_id: { $in: employee.role_ids },
+        }).lean();
+
+        if (employeeRoles.some((r) => /registrar/i.test(r.role_name))) {
           req.registrar = employee;
           return next();
         }
