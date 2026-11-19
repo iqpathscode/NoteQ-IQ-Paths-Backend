@@ -5,6 +5,38 @@ import LeaveBalance from "../models/leave/LeaveBalance.model.js";
 /**
  * Standard default leave types to seed
  */
+let isLeaveTypesSeeded = false;
+
+export async function seedInitialLeaveTypes() {
+  if (isLeaveTypesSeeded) return;
+  const count = await LeaveType.countDocuments();
+  if (count > 0) {
+    isLeaveTypesSeeded = true;
+    return;
+  }
+  for (const lt of DEFAULT_LEAVE_TYPES) {
+    await LeaveType.findOneAndUpdate(
+      { leave_type_id: lt.leave_type_id },
+      { $setOnInsert: lt },
+      { upsert: true, returnDocument: "after" }
+    );
+  }
+  isLeaveTypesSeeded = true;
+}
+
+let cachedLeaveTypes = null;
+let cachedLeaveTypesTime = 0;
+
+export async function getCachedActiveLeaveTypes() {
+  if (cachedLeaveTypes && (Date.now() - cachedLeaveTypesTime < 600000)) {
+    return cachedLeaveTypes;
+  }
+  await seedInitialLeaveTypes();
+  cachedLeaveTypes = await LeaveType.find({ is_active: true }).sort({ leave_type_id: 1 }).lean();
+  cachedLeaveTypesTime = Date.now();
+  return cachedLeaveTypes;
+}
+
 export const DEFAULT_LEAVE_TYPES = [
   {
     leave_type_id: 1,
@@ -47,19 +79,6 @@ export const DEFAULT_LEAVE_TYPES = [
     is_active: true,
   },
 ];
-
-/**
- * Seed initial leave types if not already seeded
- */
-export async function seedInitialLeaveTypes() {
-  for (const lt of DEFAULT_LEAVE_TYPES) {
-    await LeaveType.findOneAndUpdate(
-      { leave_type_id: lt.leave_type_id },
-      { $setOnInsert: lt },
-      { upsert: true, returnDocument: "after" }
-    );
-  }
-}
 
 /**
  * Calculate working leave days between from_date and to_date (inclusive),
@@ -222,46 +241,39 @@ export async function getOrInitLeaveBalance(empId, leaveTypeId, year = null, rol
 }
 
 /**
- * Get all leave balances for an employee in a given year.
- * If roleId is provided, returns role-specific balances where defined, falling back to base balances.
+ * Format balances array from an in-memory balanceMap without any DB queries.
  */
-export async function getAllEmployeeBalances(empId, year = null, roleId = null) {
-  const currentYear = year || new Date().getFullYear();
-  const empNum = Number(empId);
-  const targetRoleId =
-    roleId !== undefined && roleId !== null && roleId !== "" && !isNaN(roleId)
-      ? Number(roleId)
+export function formatBalancesFromMap(leaveTypes, balanceMap, targetRoleId, currentYear) {
+  const results = [];
+  const normalizedRoleId =
+    targetRoleId !== undefined && targetRoleId !== null && targetRoleId !== "" && !isNaN(targetRoleId)
+      ? Number(targetRoleId)
       : null;
 
-  // Ensure leave types exist
-  await seedInitialLeaveTypes();
-  const leaveTypes = await LeaveType.find({ is_active: true }).sort({ leave_type_id: 1 }).lean();
-
-  const results = [];
   for (const lt of leaveTypes) {
     let bal = null;
     let isRoleSpecific = false;
 
-    if (targetRoleId !== null) {
-      // Check for specific role balance
-      const roleBal = await LeaveBalance.findOne({
-        emp_id: empNum,
-        role_id: targetRoleId,
-        leave_type_id: lt.leave_type_id,
-        year: currentYear,
-      });
-
+    if (normalizedRoleId !== null) {
+      const roleBal = balanceMap.get(`${normalizedRoleId}_${lt.leave_type_id}`);
       if (roleBal) {
         bal = roleBal;
         isRoleSpecific = true;
       } else {
-        // Fall back to base balance
-        bal = await getOrInitLeaveBalance(empNum, lt.leave_type_id, currentYear, null);
+        bal = balanceMap.get(`base_${lt.leave_type_id}`);
         isRoleSpecific = false;
       }
     } else {
-      bal = await getOrInitLeaveBalance(empNum, lt.leave_type_id, currentYear, null);
+      bal = balanceMap.get(`base_${lt.leave_type_id}`);
       isRoleSpecific = false;
+    }
+
+    if (!bal) {
+      bal = {
+        allocated_days: lt.annual_quota || 0,
+        used_days: 0,
+        carried_forward_days: 0,
+      };
     }
 
     const remaining = Math.max(
@@ -274,16 +286,71 @@ export async function getAllEmployeeBalances(empId, year = null, roleId = null) 
       code: lt.code || lt.name.split(" ").map((w) => w[0]).join(""),
       name: lt.name,
       annual_quota: lt.annual_quota,
-      allocated_days: bal.allocated_days,
-      used_days: bal.used_days,
-      carried_forward_days: bal.carried_forward_days,
+      allocated_days: bal.allocated_days ?? 0,
+      used_days: bal.used_days ?? 0,
+      carried_forward_days: bal.carried_forward_days ?? 0,
       remaining_days: remaining,
       year: currentYear,
-      role_id: targetRoleId,
+      role_id: normalizedRoleId,
       is_role_specific: isRoleSpecific,
     });
   }
 
   return results;
+}
+
+/**
+ * Get all leave balances for an employee in a given year.
+ * If roleId is provided, returns role-specific balances where defined, falling back to base balances.
+ */
+export async function getAllEmployeeBalances(empId, year = null, roleId = null) {
+  const currentYear = year || new Date().getFullYear();
+  const empNum = Number(empId);
+  const targetRoleId =
+    roleId !== undefined && roleId !== null && roleId !== "" && !isNaN(roleId)
+      ? Number(roleId)
+      : null;
+
+  // Use cached active leave types
+  const leaveTypes = await getCachedActiveLeaveTypes();
+
+  // Batch fetch all balances for this employee and year in ONE query
+  const existingBalances = await LeaveBalance.find({
+    emp_id: empNum,
+    year: currentYear,
+  }).lean();
+
+  const balanceMap = new Map();
+  existingBalances.forEach((b) => {
+    const key = `${(b.role_id !== null && b.role_id !== undefined) ? b.role_id : "base"}_${b.leave_type_id}`;
+    balanceMap.set(key, b);
+  });
+
+  // Check if any base balances are completely missing; batch initialize them in ONE write
+  const missingBaseTypes = leaveTypes.filter((lt) => !balanceMap.has(`base_${lt.leave_type_id}`));
+  if (missingBaseTypes.length > 0) {
+    const docsToCreate = missingBaseTypes.map((lt) => ({
+      emp_id: empNum,
+      role_id: null,
+      leave_type_id: lt.leave_type_id,
+      year: currentYear,
+      allocated_days: lt.annual_quota || 0,
+      used_days: 0,
+      carried_forward_days: 0,
+    }));
+    try {
+      const created = await LeaveBalance.insertMany(docsToCreate, { ordered: false });
+      created.forEach((b) => balanceMap.set(`base_${b.leave_type_id}`, b));
+    } catch {
+      // In case of parallel race condition or duplicate key, re-fetch
+      const reloaded = await LeaveBalance.find({ emp_id: empNum, year: currentYear }).lean();
+      reloaded.forEach((b) => {
+        const key = `${(b.role_id !== null && b.role_id !== undefined) ? b.role_id : "base"}_${b.leave_type_id}`;
+        balanceMap.set(key, b);
+      });
+    }
+  }
+
+  return formatBalancesFromMap(leaveTypes, balanceMap, targetRoleId, currentYear);
 }
 

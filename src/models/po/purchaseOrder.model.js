@@ -186,7 +186,6 @@ const purchaseOrderSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
 
     email_sent_at: {
@@ -203,7 +202,6 @@ const purchaseOrderSchema = new mongoose.Schema(
 );
 
 purchaseOrderSchema.index({ po_number: 1, "vendor.name": 1 });
-purchaseOrderSchema.index({ verification_token: 1 });
 
 const PurchaseOrder = mongoose.model("PurchaseOrder", purchaseOrderSchema);
 export default PurchaseOrder;

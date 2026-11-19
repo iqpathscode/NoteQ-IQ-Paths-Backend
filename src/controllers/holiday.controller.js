@@ -1,5 +1,6 @@
 import Holiday from "../models/leave/Holiday.model.js";
 import { Counter } from "../models/counter/counter.model.js";
+import { getCache, setCache, deleteCache } from "../utility/cache.utils.js";
 
 /**
  * GET /api/holidays
@@ -8,6 +9,21 @@ import { Counter } from "../models/counter/counter.model.js";
 export const getHolidays = async (req, res) => {
   try {
     const { year, academic_year, school_id, type } = req.query;
+
+    const isStandardQuery = !school_id && !type;
+    const cacheKey = `holidays:${academic_year || year || "all"}`;
+
+    if (isStandardQuery) {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.status(200).json({
+          success: true,
+          data: cached,
+          count: cached.length,
+        });
+      }
+    }
+
     const andConditions = [];
 
     if (academic_year) {
@@ -38,6 +54,10 @@ export const getHolidays = async (req, res) => {
 
     const filter = andConditions.length > 0 ? { $and: andConditions } : {};
     const holidays = await Holiday.find(filter).sort({ holiday_date: 1, from_date: 1 }).lean();
+
+    if (isStandardQuery && holidays) {
+      await setCache(cacheKey, holidays, 3600); // 1 hr cache
+    }
 
     return res.status(200).json({
       success: true,
@@ -127,6 +147,8 @@ export const createHoliday = async (req, res) => {
       created_by_emp_id: req.user?.emp_id ? Number(req.user.emp_id) : 1,
     });
 
+    await deleteCache("holidays:*");
+
     return res.status(201).json({
       success: true,
       message: "Holiday created successfully",
@@ -199,6 +221,7 @@ export const updateHoliday = async (req, res) => {
     }
 
     const updated = await Holiday.findOneAndUpdate(query, { $set: updateFields }, { returnDocument: "after" });
+    await deleteCache("holidays:*");
 
     return res.status(200).json({
       success: true,
@@ -228,6 +251,8 @@ export const deleteHoliday = async (req, res) => {
     if (!deleted) {
       return res.status(404).json({ success: false, message: "Holiday not found" });
     }
+
+    await deleteCache("holidays:*");
 
     return res.status(200).json({
       success: true,

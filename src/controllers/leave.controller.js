@@ -18,12 +18,28 @@ import { Counter } from "../models/counter/counter.model.js";
 import { sendNotification } from "../utility/sendNotifications.js";
 import { sendMail } from "../utility/sendMail.js";
 import { env } from "../config/env.config.js";
+import { getCache, setCache, deleteCache } from "../utility/cache.utils.js";
 import {
   calculateLeaveDays,
   getOrInitLeaveBalance,
   getAllEmployeeBalances,
   seedInitialLeaveTypes,
+  getCachedActiveLeaveTypes,
+  formatBalancesFromMap,
 } from "../utility/leaveCalc.utils.js";
+
+// Helper to invalidate employee leave balance cache in Redis
+export const invalidateEmployeeLeaveCache = async (empId) => {
+  try {
+    if (empId) {
+      await deleteCache(`leave:balance:${empId}:*`);
+    } else {
+      await deleteCache(`leave:balance:*`);
+    }
+  } catch (err) {
+    console.warn("[Cache] Error invalidating leave balance cache:", err.message);
+  }
+};
 
 // Helper: Department Code Generator
 const generateDeptCode = (name = "") => {
@@ -571,6 +587,8 @@ export const applyLeave = async (req, res) => {
       req.app.get("io").emit("data:updated", { entity: "leave", action: "APPLIED" });
     }
 
+    invalidateEmployeeLeaveCache(emp_id);
+
     return res.status(201).json({
       success: true,
       message: "Leave application submitted successfully.",
@@ -673,9 +691,9 @@ export const getMyLeaves = async (req, res) => {
 
     const skip = (Number(page) - 1) * Number(limit);
     const [leaves, totalCount, leaveTypes] = await Promise.all([
-      LeaveRequest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      LeaveRequest.find(filter).select("-attachments").sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
       LeaveRequest.countDocuments(filter),
-      LeaveType.find().lean(),
+      getCachedActiveLeaveTypes(),
     ]);
 
     const typeMap = Object.fromEntries(leaveTypes.map((t) => [t.leave_type_id, t]));
@@ -839,10 +857,21 @@ export const getMyBalance = async (req, res) => {
         ? Number(req.headers["x-active-role-id"])
         : null;
 
-    // Fetch target employee and assigned roles
-    const employee = await Employee.findOne({ emp_id: targetEmpId })
-      .select("emp_id emp_name designation role_ids active_role_id dept_id")
-      .lean();
+    // Check Redis cache first (sub-millisecond return)
+    const cacheKey = `leave:balance:${targetEmpId}:${yearNum}:${targetRoleId ?? "base"}`;
+    const cachedResponse = await getCache(cacheKey);
+    if (cachedResponse) {
+      return res.status(200).json(cachedResponse);
+    }
+
+    // Parallel fetch employee, active leave types, and all existing balances in ONE query
+    const [employee, leaveTypes, existingBalances] = await Promise.all([
+      Employee.findOne({ emp_id: targetEmpId })
+        .select("emp_id emp_name designation role_ids active_role_id dept_id")
+        .lean(),
+      getCachedActiveLeaveTypes(),
+      LeaveBalance.find({ emp_id: targetEmpId, year: yearNum }).lean(),
+    ]);
 
     let employeeRoles = [];
     if (employee?.role_ids && employee.role_ids.length > 0) {
@@ -851,17 +880,47 @@ export const getMyBalance = async (req, res) => {
         .lean();
     }
 
-    // Active balance for the requested role or base
-    const balances = await getAllEmployeeBalances(targetEmpId, yearNum, targetRoleId);
+    // Index existing balances into a fast in-memory map
+    const balanceMap = new Map();
+    existingBalances.forEach((b) => {
+      const key = `${(b.role_id !== null && b.role_id !== undefined) ? b.role_id : "base"}_${b.leave_type_id}`;
+      balanceMap.set(key, b);
+    });
 
-    // Build role_balances map: "base" -> employee wide; "<roleId>" -> role specific
-    const roleBalances = {};
-    roleBalances["base"] = await getAllEmployeeBalances(targetEmpId, yearNum, null);
-    for (const r of employeeRoles) {
-      roleBalances[String(r.role_id)] = await getAllEmployeeBalances(targetEmpId, yearNum, r.role_id);
+    // Batch initialize missing base balances in ONE bulk write if any are missing
+    const missingBaseTypes = leaveTypes.filter((lt) => !balanceMap.has(`base_${lt.leave_type_id}`));
+    if (missingBaseTypes.length > 0) {
+      const docsToCreate = missingBaseTypes.map((lt) => ({
+        emp_id: targetEmpId,
+        role_id: null,
+        leave_type_id: lt.leave_type_id,
+        year: yearNum,
+        allocated_days: lt.annual_quota || 0,
+        used_days: 0,
+        carried_forward_days: 0,
+      }));
+      try {
+        const created = await LeaveBalance.insertMany(docsToCreate, { ordered: false });
+        created.forEach((b) => balanceMap.set(`base_${b.leave_type_id}`, b));
+      } catch {
+        const reloaded = await LeaveBalance.find({ emp_id: targetEmpId, year: yearNum }).lean();
+        reloaded.forEach((b) => {
+          const key = `${(b.role_id !== null && b.role_id !== undefined) ? b.role_id : "base"}_${b.leave_type_id}`;
+          balanceMap.set(key, b);
+        });
+      }
     }
 
-    return res.status(200).json({
+    // Compute active balance and role-specific balances purely in memory
+    const balances = formatBalancesFromMap(leaveTypes, balanceMap, targetRoleId, yearNum);
+
+    const roleBalances = {};
+    roleBalances["base"] = formatBalancesFromMap(leaveTypes, balanceMap, null, yearNum);
+    for (const r of employeeRoles) {
+      roleBalances[String(r.role_id)] = formatBalancesFromMap(leaveTypes, balanceMap, r.role_id, yearNum);
+    }
+
+    const payload = {
       success: true,
       data: balances,
       employee: employee
@@ -875,7 +934,12 @@ export const getMyBalance = async (req, res) => {
         : null,
       active_role_id: targetRoleId,
       role_balances: roleBalances,
-    });
+    };
+
+    // Store in Redis cache for 120 seconds
+    await setCache(cacheKey, payload, 120);
+
+    return res.status(200).json(payload);
   } catch (error) {
     console.error("getMyBalance error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch leave balances." });
@@ -1355,6 +1419,12 @@ export const getMyActiveDelegations = async (req, res) => {
       return res.status(401).json({ success: false, message: "User authentication required." });
     }
 
+    const cacheKey = `leave:delegations:${empId}`;
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.status(200).json(cached);
+    }
+
     await syncTemporaryRoleLifecycle(req.app?.get("io"));
 
     const startOfToday = new Date();
@@ -1362,23 +1432,26 @@ export const getMyActiveDelegations = async (req, res) => {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    const activeDelegations = await LeaveRequest.find({
-      status: "APPROVED",
-      is_early_resumed: { $ne: true },
-      from_date: { $lte: endOfToday },
-      to_date: { $gte: startOfToday },
-      "delegation.delegate_emp_id": empId,
-      is_deleted: { $ne: true },
-    }).lean();
-
-    const activeTempRoles = await LeaveTemporaryRole.find({
-      interim_emp_id: empId,
-      status: "ACTIVE",
-    }).lean();
+    const [activeDelegations, activeTempRoles] = await Promise.all([
+      LeaveRequest.find({
+        status: "APPROVED",
+        is_early_resumed: { $ne: true },
+        from_date: { $lte: endOfToday },
+        to_date: { $gte: startOfToday },
+        "delegation.delegate_emp_id": empId,
+        is_deleted: { $ne: true },
+      })
+        .select("leave_id emp_id created_by_name emp_name delegation from_date to_date")
+        .lean(),
+      LeaveTemporaryRole.find({
+        interim_emp_id: empId,
+        status: "ACTIVE",
+      }).lean(),
+    ]);
 
     const hasActive = activeDelegations.length > 0 || activeTempRoles.length > 0;
 
-    return res.status(200).json({
+    const payload = {
       success: true,
       has_active_delegation: hasActive,
       active_delegations: activeDelegations.map((d) => ({
@@ -1392,7 +1465,11 @@ export const getMyActiveDelegations = async (req, res) => {
         instructions: d.delegation?.instructions,
       })),
       active_temporary_roles: activeTempRoles,
-    });
+    };
+
+    await setCache(cacheKey, payload, 60);
+
+    return res.status(200).json(payload);
   } catch (error) {
     console.error("getMyActiveDelegations error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch active delegations." });
@@ -1469,6 +1546,8 @@ export const cancelLeave = async (req, res) => {
     if (req.app?.get("io")) {
       req.app.get("io").emit("data:updated", { entity: "leave", action: "CANCELLED" });
     }
+
+    invalidateEmployeeLeaveCache(leave.emp_id);
 
     return res.status(200).json({
       success: true,
@@ -1549,12 +1628,21 @@ export const getReceivedLeaves = async (req, res) => {
       filter.status = String(status).toUpperCase();
     }
 
-    const [leaves, leaveTypes, employees, departments, roles] = await Promise.all([
-      LeaveRequest.find(filter).sort({ received_at: -1 }).lean(),
-      LeaveType.find().lean(),
-      Employee.find().select("emp_id emp_name designation email dept_id role_ids active_role_id").lean(),
-      Department.find().select("dept_id dept_name").lean(),
-      Role.find().select("role_id role_name").lean(),
+    const leaves = await LeaveRequest.find(filter).select("-attachments").sort({ received_at: -1 }).lean();
+
+    if (!leaves.length) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const involvedEmpIds = [...new Set(leaves.flatMap((l) => [l.emp_id, l.current_holder_emp_id, l.created_by_emp_id]).filter(Boolean))];
+    const involvedDeptIds = [...new Set(leaves.map((l) => l.dept_id).filter(Boolean))];
+    const involvedRoleIds = [...new Set(leaves.flatMap((l) => [l.forward_to_role_id, l.created_by_role_id]).filter(Boolean))];
+
+    const [leaveTypes, employees, departments, roles] = await Promise.all([
+      getCachedActiveLeaveTypes(),
+      Employee.find({ emp_id: { $in: involvedEmpIds } }).select("emp_id emp_name designation email dept_id role_ids active_role_id").lean(),
+      Department.find({ dept_id: { $in: involvedDeptIds } }).select("dept_id dept_name").lean(),
+      Role.find({ role_id: { $in: involvedRoleIds } }).select("role_id role_name").lean(),
     ]);
 
     const typeMap = Object.fromEntries(leaveTypes.map((t) => [t.leave_type_id, t]));
@@ -5516,6 +5604,8 @@ export const resumeDutyEarly = async (req, res) => {
         io.emit("data:updated", { entity: "role_updated", emp_id: tempAssignment.interim_emp_id });
       }
     }
+
+    invalidateEmployeeLeaveCache(leave.emp_id);
 
     return res.status(200).json({
       success: true,

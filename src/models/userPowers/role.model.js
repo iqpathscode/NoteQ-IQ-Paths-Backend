@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { deleteCache } from "../../utility/cache.utils.js";
 
 const roleSchema = new mongoose.Schema(
   {
@@ -60,6 +61,10 @@ view_dept_ids: {
 roleSchema.index({ role_name: 1 });
 roleSchema.index({ power_id: 1 });
 roleSchema.index({ dept_ids: 1 });
+
+roleSchema.post(["save", "findOneAndUpdate", "updateOne", "updateMany", "deleteOne", "deleteMany"], async function () {
+  await deleteCache("roles:*");
+});
 
 const Role = mongoose.model("Role", roleSchema);
 export default Role;

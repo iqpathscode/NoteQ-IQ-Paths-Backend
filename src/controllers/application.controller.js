@@ -456,19 +456,29 @@ export const getAllApplicationsByScope = async (req, res) => {
       ...filter,
       is_deleted: { $ne: true },
     })
+      .select("-description -attachments")
       .sort({ createdAt: -1 })
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
     const applicationIds = applications.map((a) => a.application_id);
 
     const allFlows = await ApplicationFlow.find({
       application_id: { $in: applicationIds },
-    }).sort({ createdAt: 1 });
+    })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const flowByAppId = new Map();
+    allFlows.forEach((flow) => {
+      if (!flowByAppId.has(flow.application_id)) {
+        flowByAppId.set(flow.application_id, []);
+      }
+      flowByAppId.get(flow.application_id).push(flow);
+    });
 
     const processedApplications = applications.map((app) => {
-      let flow = allFlows.filter(
-        (f) => f.application_id === app.application_id,
-      );
+      let flow = flowByAppId.get(app.application_id) || [];
 
       flow = flow.filter(
         (item) =>
@@ -478,7 +488,7 @@ export const getAllApplicationsByScope = async (req, res) => {
       const currentStep = flow.find((item) => item.final_status === "PENDING");
 
       return {
-        ...app.toObject(),
+        ...app,
         flow,
         current_step: currentStep || null,
       };
@@ -517,9 +527,11 @@ export const getAllApplications = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const [applications, total] = await Promise.all([
       Application.find(filter)
+        .select("-description -attachments")
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit)),
+        .limit(Number(limit))
+        .lean(),
       Application.countDocuments(filter),
     ]);
 
@@ -608,9 +620,11 @@ export const getReceivedApplications = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const [applications, total] = await Promise.all([
       Application.find(filter)
+        .select("-description -attachments")
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit)),
+        .limit(Number(limit))
+        .lean(),
       Application.countDocuments(filter),
     ]);
 
@@ -668,11 +682,17 @@ export const getProcessedApplications = async (req, res) => {
         .lean(),
     ]);
 
+    const stepsByAppId = new Map();
+    allSteps.forEach((step) => {
+      const key = String(step.application_id);
+      if (!stepsByAppId.has(key)) {
+        stepsByAppId.set(key, []);
+      }
+      stepsByAppId.get(key).push(step);
+    });
+
     const processedApplications = applications.map((application) => {
-      const steps = allSteps.filter(
-        (step) =>
-          String(step.application_id) === String(application.application_id),
-      );
+      const steps = stepsByAppId.get(String(application.application_id)) || [];
 
       const lastActedStep = [...steps]
         .reverse()
@@ -2629,6 +2649,7 @@ export const getRecentApplications = async (req, res) => {
     }
 
     const recentApplications = await Application.find(filter)
+      .select("application_id subject applicationType status priority createdAt mode level dept_id")
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();

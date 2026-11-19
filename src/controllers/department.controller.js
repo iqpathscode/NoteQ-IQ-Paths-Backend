@@ -3,6 +3,7 @@ import { Counter } from "../models/counter/counter.model.js";
 import School from "../models/office/school.model.js";
 import Employee from "../models/user/employee.model.js";
 import Role from "../models/userPowers/role.model.js";
+import { getCache, setCache, deleteCache } from "../utility/cache.utils.js";
 
 const departmentListPipeline = (matchStage = null) => {
   const pipeline = [];
@@ -99,6 +100,8 @@ export const createDepartment = async (req, res) => {
       school_id,
     });
 
+    await deleteCache("departments:*");
+
     return res.status(201).json({
       success: true,
       message: "Department created successfully",
@@ -119,6 +122,21 @@ export const getDepartments = async (req, res) => {
   try {
     const search = req.query.search?.trim();
     const schoolId = Number(req.query.schoolId);
+
+    const isDefaultFetch = !search && !schoolId;
+    const cacheKey = "departments:all";
+
+    if (isDefaultFetch) {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.status(200).json({
+          success: true,
+          message: "Departments fetched successfully",
+          data: cached,
+        });
+      }
+    }
+
     const matchFilters = {};
 
     if (search) {
@@ -137,6 +155,10 @@ export const getDepartments = async (req, res) => {
     const departments = await Department.aggregate(
       departmentListPipeline(matchStage)
     );
+
+    if (isDefaultFetch && departments) {
+      await setCache(cacheKey, departments, 3600);
+    }
 
     return res.status(200).json({
       success: true,
@@ -195,6 +217,7 @@ export const deleteDepartment = async (req, res) => {
     }
 
     await Department.deleteOne({ dept_id: deptId });
+    await deleteCache("departments:*");
 
     return res.status(200).json({
       success: true,

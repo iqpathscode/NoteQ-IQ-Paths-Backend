@@ -68,5 +68,11 @@ const notesheetFlowSchema = new mongoose.Schema(
   }
 );
 
+// Performance Indexes for lookups, aggregations and history fetching
+notesheetFlowSchema.index({ note_id: 1, createdAt: 1 });
+notesheetFlowSchema.index({ from_role_id: 1, from_emp_id: 1, createdAt: 1 });
+notesheetFlowSchema.index({ from_emp_id: 1, action: 1 });
+notesheetFlowSchema.index({ note_id: 1, final_status: 1 });
+
 const NotesheetFlow = mongoose.model('NotesheetFlow', notesheetFlowSchema);
 export default NotesheetFlow;

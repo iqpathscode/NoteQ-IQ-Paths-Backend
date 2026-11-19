@@ -1,5 +1,6 @@
 import Announcement from "../models/Announce/Announcement.js";
 import { v2 as cloudinary } from "cloudinary";
+import { getCache, setCache, deleteCache } from "../utility/cache.utils.js";
 // cloudinary.config() is already called once in your existing upload
 // middleware file (the one with CloudinaryStorage) — that config is
 // global, so as long as that file gets imported somewhere in the app
@@ -51,10 +52,23 @@ export const getAllAnnouncements = async (req, res) => {
 // ------------------------------------------------------------------
 export const getActiveAnnouncements = async (req, res) => {
   try {
+    const cacheKey = "announcements:active";
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.status(200).json(cached);
+    }
+
     const now = new Date();
     const announcements = await Announcement.find({
       $or: [{ expiresAt: null }, { expiresAt: { $gte: now } }],
-    }).sort({ createdAt: -1 });
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (announcements) {
+      await setCache(cacheKey, announcements, 300); // 5 min cache
+    }
+
     res.status(200).json(announcements);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch announcements", error: err.message });
@@ -94,6 +108,8 @@ export const createAnnouncement = async (req, res) => {
       imagePublicId,
       createdBy: req.user?._id, // set by your auth middleware, if available
     });
+
+    await deleteCache("announcements:*");
 
     res.status(201).json(announcement);
   } catch (err) {
@@ -143,6 +159,7 @@ export const updateAnnouncement = async (req, res) => {
     }
 
     await announcement.save();
+    await deleteCache("announcements:*");
     res.status(200).json(announcement);
   } catch (err) {
     res.status(500).json({ message: "Failed to update announcement", error: err.message });
@@ -162,6 +179,7 @@ export const deleteAnnouncement = async (req, res) => {
 
     await deleteAnnouncementImage(announcement.imagePublicId);
     await announcement.deleteOne();
+    await deleteCache("announcements:*");
 
     res.status(200).json({ message: "Announcement deleted" });
   } catch (err) {

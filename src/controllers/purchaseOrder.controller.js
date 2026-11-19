@@ -224,13 +224,19 @@ export const getAllPurchaseOrders = async (req, res) => {
       query.status = status.toUpperCase();
     }
 
-    if (search) {
+    if (search && search.trim()) {
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { po_number: { $regex: search, $options: "i" } },
-        { "vendor.name": { $regex: search, $options: "i" } },
-        { department_name: { $regex: search, $options: "i" } },
-        { budget_head: { $regex: search, $options: "i" } },
-        { ref_notesheet_id: { $regex: search, $options: "i" } },
+        { po_number: { $regex: safeSearch, $options: "i" } },
+        { "vendor.name": { $regex: safeSearch, $options: "i" } },
+        { "vendor.contact_person": { $regex: safeSearch, $options: "i" } },
+        { "vendor.email": { $regex: safeSearch, $options: "i" } },
+        { "vendor.phone": { $regex: safeSearch, $options: "i" } },
+        { department_name: { $regex: safeSearch, $options: "i" } },
+        { budget_head: { $regex: safeSearch, $options: "i" } },
+        { ref_notesheet_id: { $regex: safeSearch, $options: "i" } },
+        { "items.item_name": { $regex: safeSearch, $options: "i" } },
+        { "items.specification": { $regex: safeSearch, $options: "i" } },
       ];
     }
 

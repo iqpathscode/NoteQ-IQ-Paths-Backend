@@ -89,6 +89,8 @@ const leaveFlowSchema = new mongoose.Schema(
 );
 
 leaveFlowSchema.index({ leave_id: 1, createdAt: 1 });
+leaveFlowSchema.index({ from_role_id: 1, from_emp_id: 1, createdAt: 1 });
+leaveFlowSchema.index({ leave_id: 1, final_status: 1 });
 
 const LeaveFlow = mongoose.model("LeaveFlow", leaveFlowSchema);
 export default LeaveFlow;
