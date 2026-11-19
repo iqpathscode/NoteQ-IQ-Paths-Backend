@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { deleteCache } from "../../utility/cache.utils.js";
 
 const categorySchema = new mongoose.Schema(
   {
@@ -23,6 +24,10 @@ const appConfigSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+appConfigSchema.post(["save", "findOneAndUpdate", "updateOne", "updateMany"], async function () {
+  await deleteCache("app_config:*");
+});
 
 const AppConfig = mongoose.model("AppConfig", appConfigSchema);
 export default AppConfig;

@@ -170,7 +170,6 @@ const nocSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
 
     ref_notesheet_id: {
@@ -191,7 +190,6 @@ const nocSchema = new mongoose.Schema(
 
 // Search optimization index
 nocSchema.index({ recipient_id: 1, noc_number: 1 });
-nocSchema.index({ verification_token: 1 });
 
 const NOC = mongoose.model("NOC", nocSchema);
 export default NOC;
