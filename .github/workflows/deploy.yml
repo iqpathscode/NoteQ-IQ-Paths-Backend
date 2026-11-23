@@ -1,0 +1,31 @@
+name: Deploy NoteQ Backend to MilesWeb
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to MilesWeb Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.MILESWEB_HOST }}
+          username: ${{ secrets.MILESWEB_USER }}
+          key: ${{ secrets.MILESWEB_SSH_KEY }}
+          port: ${{ secrets.MILESWEB_PORT }}
+          script: |
+            # 1. Project folder me switch karein
+            cd /home/yjgudwzz/noteqbackend.iqpaths.com
+
+            # 2. Latest code pull karein
+            git pull origin main
+
+            # 3. Production packages install karein
+            npm install --omit=dev
+
+            # 4. cPanel Passenger Restart Trigger
+            mkdir -p tmp && touch tmp/restart.txt
