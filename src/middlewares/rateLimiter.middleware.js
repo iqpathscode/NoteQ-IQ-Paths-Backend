@@ -2,18 +2,30 @@ import rateLimit from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import redis from "../config/redis.config.js"; // existing redis client reuse
 
+// Helper to create store with fallback to MemoryStore if Redis is offline
+const getStore = (prefix) => {
+  if (!redis) return undefined;
+  return new RedisStore({
+    sendCommand: async (...args) => {
+      if (redis.status !== "ready") {
+        throw new Error("Redis not ready");
+      }
+      return await redis.call(...args);
+    },
+    prefix,
+  });
+};
+
 // ======================== LOGIN RATE LIMITER ========================
 export const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true, // Don't block users if Redis fails
 
-  // ✅ Redis store — server restart pe bhi persist rahega
-  store: new RedisStore({
-    sendCommand: (...args) => redis.call(...args), // ioredis ka .call()
-    prefix: "login_limit:",
-  }),
+  // ✅ Redis store with memory fallback
+  store: getStore("login_limit:"),
 
   // ✅ IP + Email combined — shared IP issue fix
   keyGenerator: (req) => {
@@ -46,12 +58,10 @@ export const forgotPasswordRateLimiter = rateLimit({
   max: 3,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
 
-  // ✅ Redis store
-  store: new RedisStore({
-    sendCommand: (...args) => redis.call(...args),
-    prefix: "forgot_limit:",
-  }),
+  // ✅ Redis store with memory fallback
+  store: getStore("forgot_limit:"),
 
   // ✅ Sirf email based — IP nahi
   // Kyunki forgot password mein IP sharing se koi issue nahi
@@ -74,13 +84,10 @@ export const generalRateLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
 
-  // General ke liye Redis store zaroori nahi — IP based theek hai
-  // Lekin consistency ke liye lagao
-  store: new RedisStore({
-    sendCommand: (...args) => redis.call(...args),
-    prefix: "general_limit:",
-  }),
+  // General rate limiter with memory fallback
+  store: getStore("general_limit:"),
 
   handler: (req, res) => {
     return res.status(429).json({

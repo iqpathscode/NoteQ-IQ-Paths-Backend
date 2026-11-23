@@ -6,7 +6,7 @@ import redis from "../config/redis.config.js";
  */
 export const getCache = async (key) => {
   try {
-    if (!redis || (redis.status !== "ready" && redis.status !== "connecting")) return null;
+    if (!redis || redis.status !== "ready") return null;
     const data = await redis.get(key);
     return data ? JSON.parse(data) : null;
   } catch (err) {
@@ -20,7 +20,7 @@ export const getCache = async (key) => {
  */
 export const setCache = async (key, value, ttlSeconds = 300) => {
   try {
-    if (!redis || (redis.status !== "ready" && redis.status !== "connecting")) return false;
+    if (!redis || redis.status !== "ready") return false;
     const serialized = JSON.stringify(value);
     if (ttlSeconds) {
       await redis.setex(key, ttlSeconds, serialized);
@@ -39,7 +39,7 @@ export const setCache = async (key, value, ttlSeconds = 300) => {
  */
 export const deleteCache = async (pattern) => {
   try {
-    if (!redis || (redis.status !== "ready" && redis.status !== "connecting")) return false;
+    if (!redis || redis.status !== "ready") return false;
     if (pattern.includes("*")) {
       const keys = await redis.keys(pattern);
       if (keys && keys.length > 0) {

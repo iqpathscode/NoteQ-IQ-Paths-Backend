@@ -73,8 +73,13 @@ export const verifyAuthToken = (token) => {
 };
 
 export const isTokenBlacklisted = async (token) => {
-  const result = await redis.get(`blacklist:${token}`);
-  return Boolean(result);
+  try {
+    if (!redis || redis.status !== "ready") return false;
+    const result = await redis.get(`blacklist:${token}`);
+    return Boolean(result);
+  } catch {
+    return false;
+  }
 };
 
 export const blacklistToken = async (token) => {
@@ -96,6 +101,7 @@ export const blacklistToken = async (token) => {
   if (expirySeconds <= 0) return false;
 
   try {
+    if (!redis || redis.status !== "ready") return false;
     await redis.setex(`blacklist:${cleanToken}`, expirySeconds, "true");
     return true;
   } catch (err) {
