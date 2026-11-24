@@ -7,10 +7,6 @@ import { env } from "./src/config/env.config.js";
 
 const port = env.PORT || 5000;
 
-// DB connect & Auto-seed
-await dbConnect();
-await autoSeedOnStartup();
-
 // http server (socket.io ke liye express app ko wrap karna zaroori hai)
 const server = http.createServer(app);
 
@@ -33,7 +29,19 @@ io.on('connection', (socket) => {
 // controllers me `req.app.get('io')` se access karne ke liye
 app.set('io', io);
 
-// server start
+// Server start immediately so LiteSpeed/Passenger binds socket without timeout
 server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
+
+// DB connect & Auto-seed (Non-blocking without top-level await for LiteSpeed compatibility)
+const initApp = async () => {
+  try {
+    await dbConnect();
+    await autoSeedOnStartup();
+  } catch (err) {
+    console.error("Failed to initialize database/autoSeed:", err);
+  }
+};
+
+initApp();
