@@ -29,7 +29,6 @@ app.use(compression());
 const allowedOrigins = [
   "http://localhost:5173",
   "https://intellect-quest-paths-yc7m.vercel.app",
-  "https://noteq.iqpaths.com"
 ];
 
 app.use(
@@ -49,6 +48,9 @@ app.use(
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Allow Let's Encrypt / AutoSSL to verify domain ownership via ACME HTTP-01 challenge
+app.use("/.well-known", express.static(".well-known"));
 
 // routes
 app.use("/api/auth", authRoutes);
