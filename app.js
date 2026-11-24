@@ -25,6 +25,16 @@ const app = express();
 
 app.use(compression());
 
+// Auto-redirect www to non-www HTTPS
+app.use((req, res, next) => {
+  const host = req.headers.host || "";
+  if (host.startsWith("www.")) {
+    const cleanHost = host.replace(/^www\./i, "");
+    return res.redirect(301, `https://${cleanHost}${req.originalUrl}`);
+  }
+  next();
+});
+
 // middleware
 const allowedOrigins = [
   "http://localhost:5173",
