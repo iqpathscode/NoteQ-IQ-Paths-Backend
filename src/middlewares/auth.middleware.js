@@ -10,19 +10,60 @@ import {
   verifyAuthToken,
   isTokenBlacklisted,
 } from "../utility/authToken.utils.js";
+import { getCache, setCache, getOrSetCache } from "../utility/cache.utils.js";
+
+const TEMP_ROLE_SYNC_TTL_SECONDS = 60;
+const APP_MODULES_CACHE_KEY = "app_config:modules";
+const DEFAULT_MODULES = { notesheet: true, application: true, leave: true };
+
+const getCachedModules = async () => {
+  return getOrSetCache(APP_MODULES_CACHE_KEY, 60, async () => {
+    const config = await AppConfig.findOne({ key: "app_config" }).select("modules").lean();
+    return config?.modules || DEFAULT_MODULES;
+  });
+};
 
 const syncEmployeeTemporaryRoles = async (employee) => {
   const roleIdsSet = new Set((employee.role_ids || []).map(Number));
   const tempRoleIdsSet = new Set((employee.temporary_role_ids || []).map(Number));
   let effectiveActiveRoleId = employee.active_role_id;
 
+  const syncCacheKey = `temp_role_sync:${employee.emp_id}`;
+  const cachedSync = await getCache(syncCacheKey);
+  if (cachedSync) {
+    for (const rId of cachedSync.activeRoleIds || []) {
+      const numId = Number(rId);
+      tempRoleIdsSet.add(numId);
+      roleIdsSet.add(numId);
+    }
+    return {
+      temporaryRoleIds: Array.from(tempRoleIdsSet),
+      effectiveRoleIds: Array.from(roleIdsSet),
+      effectiveActiveRoleId,
+    };
+  }
+
   const now = new Date();
-  const dueScheduled = await LeaveTemporaryRole.find({
-    interim_emp_id: employee.emp_id,
-    status: "SCHEDULED",
-    start_date: { $lte: now },
-    end_date: { $gte: now },
-  });
+  const [dueScheduled, expiredActive, activeTempRoles] = await Promise.all([
+    LeaveTemporaryRole.find({
+      interim_emp_id: employee.emp_id,
+      status: "SCHEDULED",
+      start_date: { $lte: now },
+      end_date: { $gte: now },
+    }),
+    LeaveTemporaryRole.find({
+      interim_emp_id: employee.emp_id,
+      status: "ACTIVE",
+      end_date: { $lt: now },
+    }),
+    LeaveTemporaryRole.find({
+      interim_emp_id: employee.emp_id,
+      status: "ACTIVE",
+      end_date: { $gte: now },
+    })
+      .select("role_id")
+      .lean(),
+  ]);
 
   for (const sch of dueScheduled) {
     sch.status = "ACTIVE";
@@ -34,12 +75,6 @@ const syncEmployeeTemporaryRoles = async (employee) => {
     roleIdsSet.add(Number(sch.role_id));
     tempRoleIdsSet.add(Number(sch.role_id));
   }
-
-  const expiredActive = await LeaveTemporaryRole.find({
-    interim_emp_id: employee.emp_id,
-    status: "ACTIVE",
-    end_date: { $lt: now },
-  });
 
   for (const exp of expiredActive) {
     exp.status = "EXPIRED_AND_RESTORED";
@@ -69,16 +104,15 @@ const syncEmployeeTemporaryRoles = async (employee) => {
     }
   }
 
-  const activeTempRoles = await LeaveTemporaryRole.find({
-    interim_emp_id: employee.emp_id,
-    status: "ACTIVE",
-  }).lean();
-
+  const activeRoleIds = [];
   for (const tempRole of activeTempRoles) {
     const roleId = Number(tempRole.role_id);
+    activeRoleIds.push(roleId);
     tempRoleIdsSet.add(roleId);
     roleIdsSet.add(roleId);
   }
+
+  await setCache(syncCacheKey, { activeRoleIds }, TEMP_ROLE_SYNC_TTL_SECONDS);
 
   return {
     temporaryRoleIds: Array.from(tempRoleIdsSet),
@@ -97,7 +131,7 @@ const authenticateAdmin = async (decoded, req, res, next) => {
   }
 
   const admin = await Admin.findOne({ admin_id: decoded.admin_id })
-    .select("-password -resetToken -resetTokenExpiry")
+    .select("admin_id email is_active is_super_admin")
     .lean();
 
   if (!admin) {
@@ -141,7 +175,7 @@ const authenticateEmployee = async (decoded, req, res, next) => {
   }
 
   const employee = await Employee.findOne({ emp_id: decoded.emp_id })
-    .select("-password -resetToken -resetTokenExpiry")
+    .select("emp_id email dept_id role_ids active_role_id temporary_role_ids is_active")
     .lean();
 
   if (!employee) {
@@ -178,6 +212,10 @@ const authenticateEmployee = async (decoded, req, res, next) => {
 
 // ================= AUTHENTICATE =================
 export const authenticate = async (req, res, next) => {
+  if (req._authenticated && req.user) {
+    return next();
+  }
+
   const token = extractToken(req);
 
   if (!token) {
@@ -229,6 +267,7 @@ export const authenticate = async (req, res, next) => {
   }
 
   try {
+    req._authenticated = true;
     if (decoded.isAdmin) {
       return await authenticateAdmin(decoded, req, res, next);
     }
@@ -267,8 +306,7 @@ export const isSuperAdmin = (req, res, next) => {
 // ================= MODULE REQUIREMENT CHECK =================
 export const requireModule = (moduleName) => async (req, res, next) => {
   try {
-    const config = await AppConfig.findOne({ key: "app_config" }).lean();
-    const modules = config?.modules || { notesheet: true, application: true, leave: true };
+    const modules = await getCachedModules();
     const key = moduleName.toLowerCase();
     if (modules[key] === false) {
       return res.status(403).json({
@@ -285,8 +323,7 @@ export const requireModule = (moduleName) => async (req, res, next) => {
 
 export const requireAnyModule = (moduleNames = []) => async (req, res, next) => {
   try {
-    const config = await AppConfig.findOne({ key: "app_config" }).lean();
-    const modules = config?.modules || { notesheet: true, application: true, leave: true };
+    const modules = await getCachedModules();
     const hasAny = moduleNames.some((m) => modules[m.toLowerCase()] !== false);
     if (!hasAny) {
       return res.status(403).json({

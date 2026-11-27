@@ -19,6 +19,7 @@ import hrmsManageRoutes from "./src/routes/hrmsManage.routes.js";
 import nocRoutes from "./src/routes/noc.routes.js";
 import purchaseOrderRoutes from "./src/routes/purchaseOrder.routes.js";
 import { errorHandler } from "./src/middlewares/errorHandler.js";
+import { generalRateLimiter } from "./src/middlewares/rateLimiter.middleware.js";
 import compression from "compression";
 
 const app = express();
@@ -63,6 +64,11 @@ app.use(cookieParser());
 // Allow Let's Encrypt / AutoSSL to verify domain ownership via ACME HTTP-01 challenge
 app.use("/.well-known", express.static(".well-known"));
 
+app.set("trust proxy", 1);
+
+// General API rate limit (user-scoped for authenticated traffic, campus-NAT safe)
+app.use("/api", generalRateLimiter);
+
 // routes
 app.use("/api/auth", authRoutes);
 app.use("/api", uploadRoutes);
@@ -79,7 +85,6 @@ app.use("/api/holidays", requireModule("leave"), holidayRoutes);
 app.use("/api/hrms", requireModule("leave"), hrmsManageRoutes);
 app.use("/api/noc", nocRoutes);
 app.use("/api/po", purchaseOrderRoutes);
-app.set("trust proxy", 1);
 
 app.get("/test", (req, res) => {
   res.send("API working");

@@ -14,17 +14,26 @@ const io = new Server(server, {
   cors: {
     origin: env.FRONTEND_URL,
     credentials: true
-  }
+  },
+  transports: ["websocket", "polling"],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  perMessageDeflate: false,
 });
 
 io.on('connection', (socket) => {
   socket.on('join', (userId) => {
-    socket.join(`emp_${userId}`);
-    console.log(`🔗 Socket ${socket.id} joined room: emp_${userId}`); // debug ke liye rakh lo abhi
+    if (userId) {
+      socket.join(`emp_${userId}`);
+    }
   });
 
   socket.on('disconnect', () => {});
 });
+
+// Keep-alive timeouts tuned above standard reverse-proxy / LB idle timeouts (60s)
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
 // controllers me `req.app.get('io')` se access karne ke liye
 app.set('io', io);

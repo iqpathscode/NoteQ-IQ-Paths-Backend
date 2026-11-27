@@ -1,6 +1,7 @@
 import rateLimit from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import redis from "../config/redis.config.js"; // existing redis client reuse
+import { extractToken, verifyAuthToken } from "../utility/authToken.utils.js";
 
 // Helper to create store with fallback to MemoryStore if Redis is offline
 const getStore = (prefix) => {
@@ -79,15 +80,47 @@ export const forgotPasswordRateLimiter = rateLimit({
 });
 
 // ======================== GENERAL API RATE LIMITER ========================
+const getClientIp = (req) =>
+  req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
+  req.ip ||
+  req.socket?.remoteAddress ||
+  "unknown-ip";
+
+const resolveGeneralIdentity = (req) => {
+  if (req._rateLimitIdentity) return req._rateLimitIdentity;
+  const token = extractToken(req);
+  if (token) {
+    try {
+      const decoded = verifyAuthToken(token);
+      if (decoded?.admin_id) {
+        req._rateLimitIdentity = { key: `admin:${decoded.admin_id}`, isUser: true };
+        return req._rateLimitIdentity;
+      }
+      if (decoded?.emp_id) {
+        req._rateLimitIdentity = { key: `emp:${decoded.emp_id}`, isUser: true };
+        return req._rateLimitIdentity;
+      }
+    } catch {
+      // Invalid/expired token falls back to IP key
+    }
+  }
+  req._rateLimitIdentity = { key: `ip:${getClientIp(req)}`, isUser: false };
+  return req._rateLimitIdentity;
+};
+
 export const generalRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  // Per-user limit (240/min) prevents shared campus NAT IP from blocking 1000 concurrent users;
+  // IP fallback allows high shared-IP burst (1500/min) for unauthenticated/public routes.
+  max: (req) => (resolveGeneralIdentity(req).isUser ? 240 : 1500),
   standardHeaders: true,
   legacyHeaders: false,
   passOnStoreError: true,
+  validate: { keyGeneratorIpFallback: false },
 
-  // General rate limiter with memory fallback
   store: getStore("general_limit:"),
+
+  keyGenerator: (req) => resolveGeneralIdentity(req).key,
 
   handler: (req, res) => {
     return res.status(429).json({

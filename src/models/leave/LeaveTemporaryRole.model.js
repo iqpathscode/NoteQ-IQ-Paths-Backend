@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { deleteCache } from "../../utility/cache.utils.js";
 
 const leaveTemporaryRoleSchema = new mongoose.Schema(
   {
@@ -109,9 +110,13 @@ const leaveTemporaryRoleSchema = new mongoose.Schema(
 );
 
 leaveTemporaryRoleSchema.index({ role_id: 1, status: 1 });
-leaveTemporaryRoleSchema.index({ interim_emp_id: 1, status: 1 });
+leaveTemporaryRoleSchema.index({ interim_emp_id: 1, status: 1, end_date: 1 });
 leaveTemporaryRoleSchema.index({ original_emp_id: 1, status: 1 });
 leaveTemporaryRoleSchema.index({ leave_id: 1, status: 1 });
+
+leaveTemporaryRoleSchema.post(["save", "findOneAndUpdate", "updateOne", "updateMany", "deleteOne", "deleteMany"], async function () {
+  await deleteCache("temp_role_sync:*");
+});
 
 const LeaveTemporaryRole = mongoose.model("LeaveTemporaryRole", leaveTemporaryRoleSchema);
 export default LeaveTemporaryRole;

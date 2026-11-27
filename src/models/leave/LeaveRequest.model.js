@@ -259,6 +259,8 @@ leaveRequestSchema.index({ current_holder_emp_id: 1, status: 1, is_deleted: 1, r
 leaveRequestSchema.index({ forward_to_role_id: 1, status: 1, createdAt: -1 });
 leaveRequestSchema.index({ forward_to_role_id: 1, status: 1, is_deleted: 1, received_at: -1 });
 leaveRequestSchema.index({ "delegation.delegate_emp_id": 1, status: 1, is_deleted: 1, to_date: 1, from_date: 1 });
+leaveRequestSchema.index({ dept_id: 1, is_deleted: 1, createdAt: -1 });
+leaveRequestSchema.index({ is_deleted: 1, dept_id: 1, status: 1 });
 leaveRequestSchema.index({ is_deleted: 1, createdAt: -1 });
 
 const LeaveRequest = mongoose.model("LeaveRequest", leaveRequestSchema);
