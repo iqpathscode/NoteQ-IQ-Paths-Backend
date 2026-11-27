@@ -2602,6 +2602,68 @@ export const getEmployeeApplicationSummary = async (req, res) => {
   }
 };
 
+export const getApplicationsForEmployee = async (req, res) => {
+  try {
+    const empId = Number(req.params.empId || req.query.empId);
+    const status = req.query.status;
+    const roleId = req.query.role_id ? Number(req.query.role_id) : null;
+    const viewType = req.query.view_type; // "role" | "employee"
+
+    if (!empId) {
+      return res.status(400).json({
+        success: false,
+        message: "empId is required",
+      });
+    }
+
+    const query = {
+      created_by_emp_id: empId,
+      is_deleted: { $ne: true },
+    };
+
+    if (viewType === "role" && roleId) {
+      query.created_by_role_id = roleId;
+    } else {
+      query.created_by_role_id = null;
+    }
+
+    if (status && status !== "all") {
+      query.status = String(status).toUpperCase();
+    }
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Number(req.query.limit) || 0;
+
+    let applicationsQuery = Application.find(query)
+      .select("-attachments")
+      .sort({ createdAt: -1 });
+
+    if (limit > 0) {
+      applicationsQuery = applicationsQuery
+        .skip((page - 1) * limit)
+        .limit(limit);
+    }
+
+    const applications = await applicationsQuery.lean();
+
+    const formatted = applications.map((app) => ({
+      ...app,
+      created_by_name: app.created_by_name || app.emp_name || "",
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: formatted,
+    });
+  } catch (error) {
+    console.error("Error fetching employee applications:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
 export const getRecentApplications = async (req, res) => {
   try {
     const roleId = req.query.role_id ? Number(req.query.role_id) : null;
