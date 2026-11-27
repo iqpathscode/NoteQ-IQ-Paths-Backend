@@ -7,6 +7,7 @@ import {
   getAllApplications,
   getReceivedApplications,
   getEmployeeApplicationSummary,
+  getApplicationsForEmployee,
   getRecentApplications,
   getProcessedApplications,
   getApplicationApprovalFlow,
@@ -38,35 +39,36 @@ const blockTempRole = ensureNotTemporaryRole("Application");
 
 // ── List Routes ───────────────────────────────────────────────────────────────
 router.post("/", blockTempRole, upload.array("attachments", 5), createApplication);
-router.get("/my", authenticate, getAllApplicationsByScope);
+router.get("/my", getAllApplicationsByScope);
 router.get("/admin/all", isAdmin, getAllApplications);
-router.get("/received", authenticate, blockTempRole, getReceivedApplications);
-router.get("/processed", authenticate, getProcessedApplications);
-router.get("/approved-by-role", authenticate, getApprovedApplicationsByRole);
-router.get("/execution", authenticate, getExecutionApplications);
+router.get("/received", blockTempRole, getReceivedApplications);
+router.get("/processed", getProcessedApplications);
+router.get("/approved-by-role", getApprovedApplicationsByRole);
+router.get("/execution", getExecutionApplications);
 
 
-//FIXED: ye 2 routes /:application_id se PEHLE aane chahiye,
+//FIXED: ye routes /:application_id se PEHLE aane chahiye,
 //warna "/employee" aur "/applications" khud application_id maan liye jaate hain
-router.get("/employee/:empId/applications/summary", authenticate, getEmployeeApplicationSummary);
-router.get("/recent", authenticate, getRecentApplications);
-router.get("/:application_id/approval-flow", authenticate, getApplicationApprovalFlow);
-router.get("/:application_id/locate", authenticate, locateApplication);
+router.get("/employee/:empId/applications/summary", getEmployeeApplicationSummary);
+router.get("/employee/:empId/applications", getApplicationsForEmployee);
+router.get("/recent", getRecentApplications);
+router.get("/:application_id/approval-flow", getApplicationApprovalFlow);
+router.get("/:application_id/locate", locateApplication);
 
 // ── Single Application — KEEP LAST ───────────────────────────────────────────
-router.get("/:application_id", authenticate, getApplicationById);
-router.put("/:application_id/edit", authenticate, blockTempRole, editApplication);
-router.patch("/:application_id/approve/direct", authenticate, blockTempRole, approveApplicationDirect);
-router.patch("/:application_id/approve/chain", authenticate, blockTempRole, approveApplicationChain);
-router.patch("/:application_id/forward/direct", authenticate, blockTempRole, forwardApplicationDirect);
-router.patch("/:application_id/forward/chain", authenticate, blockTempRole, forwardApplicationChain);
-router.patch("/:application_id/close", authenticate, blockTempRole, closeApplication);
-router.patch("/:application_id/reject", authenticate, blockTempRole, rejectApplication);
-router.patch("/:application_id/query", authenticate, blockTempRole, raiseQuery);
-router.patch("/execution/start/:applicationId", authenticate, forwardExecutionApplication);
-router.patch("/execution/complete/:applicationId", authenticate, completeExecutionApplication);
-router.get("/:application_id/queries", authenticate, getQueriesByApplicationId);
-router.patch("/:application_id/query-reply", authenticate, replyToQuery);
-router.delete("/:application_id", authenticate, deleteApplication);
+router.get("/:application_id", getApplicationById);
+router.put("/:application_id/edit", blockTempRole, editApplication);
+router.patch("/:application_id/approve/direct", blockTempRole, approveApplicationDirect);
+router.patch("/:application_id/approve/chain", blockTempRole, approveApplicationChain);
+router.patch("/:application_id/forward/direct", blockTempRole, forwardApplicationDirect);
+router.patch("/:application_id/forward/chain", blockTempRole, forwardApplicationChain);
+router.patch("/:application_id/close", blockTempRole, closeApplication);
+router.patch("/:application_id/reject", blockTempRole, rejectApplication);
+router.patch("/:application_id/query", blockTempRole, raiseQuery);
+router.patch("/execution/start/:applicationId", forwardExecutionApplication);
+router.patch("/execution/complete/:applicationId", completeExecutionApplication);
+router.get("/:application_id/queries", getQueriesByApplicationId);
+router.patch("/:application_id/query-reply", replyToQuery);
+router.delete("/:application_id", deleteApplication);
 
 export default router;

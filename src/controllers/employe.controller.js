@@ -10,6 +10,7 @@ import Power from "../models/userPowers/power.model.js";
 import Application from "../models/application/Application.model.js";
 import LeaveTemporaryRole from "../models/leave/LeaveTemporaryRole.model.js";
 import LeaveRequest from "../models/leave/LeaveRequest.model.js";
+import { getOrSetCache } from "../utility/cache.utils.js";
 
 const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CLOSED", "IN_EXECUTION"];
 
@@ -208,7 +209,9 @@ const employeeDetailsPipeline = (matchStage = null) => {
 
 export const getEmployeesWithDetails = async (req, res) => {
   try {
-    const employees = await Employee.aggregate(employeeDetailsPipeline());
+    const employees = await getOrSetCache("employees:with_details", 30, () =>
+      Employee.aggregate(employeeDetailsPipeline())
+    );
 
     return res.status(200).json({
       success: true,

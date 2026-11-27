@@ -4,6 +4,7 @@ import LeaveRequest from "../models/leave/LeaveRequest.model.js";
 import Department from "../models/office/department.model.js";
 import Employee from "../models/user/employee.model.js";
 import AppConfig from "../models/counter/AppConfig.js";
+import { getOrSetCache } from "../utility/cache.utils.js";
 
 const STATUS_STYLES = {
   APPROVED: {
@@ -61,186 +62,208 @@ const getStatusInfo = (status) => {
   };
 };
 
-// Helper to detect forwarded / in-execution items
-const isItemForwarded = (item) => {
-  if (item.status === "IN_EXECUTION" || item.status === "QUERY_RAISED") return true;
-  if (item.status === "PENDING") {
-    if (item.forward_to_emp_id) return true;
-    if (Array.isArray(item.action_history) && item.action_history.some((a) => a.action === "FORWARDED")) return true;
-  }
-  return false;
+const RECENT_ACTIVITIES_LIMIT = 50;
+
+const bucketExpr = {
+  $switch: {
+    branches: [
+      { case: { $eq: ["$status", "APPROVED"] }, then: "approved" },
+      {
+        case: {
+          $or: [
+            { $eq: ["$status", "CLOSED"] },
+            { $eq: ["$status", "CANCELLED"] },
+            { $eq: ["$lifecycle_status", "CLOSED"] },
+          ],
+        },
+        then: "closed",
+      },
+      { case: { $eq: ["$status", "REJECTED"] }, then: "rejected" },
+      {
+        case: {
+          $or: [
+            { $eq: ["$status", "IN_EXECUTION"] },
+            { $eq: ["$status", "QUERY_RAISED"] },
+            {
+              $and: [
+                { $eq: ["$status", "PENDING"] },
+                { $ne: ["$forward_to_emp_id", null] },
+                { $ne: ["$forward_to_emp_id", 0] },
+              ],
+            },
+          ],
+        },
+        then: "forwarded",
+      },
+    ],
+    default: "pending",
+  },
 };
 
-// Helper to detect closed / cancelled items
-const isItemClosed = (item) => {
-  return item.status === "CLOSED" || item.status === "CANCELLED" || item.lifecycle_status === "CLOSED";
+const aggregateModuleStats = async (Model, idField, titleField, cutoffDate) => {
+  const [result] = await Model.aggregate([
+    { $match: { is_deleted: { $ne: true } } },
+    {
+      $facet: {
+        byDept: [
+          { $addFields: { _bucket: bucketExpr } },
+          {
+            $group: {
+              _id: "$dept_id",
+              approved: { $sum: { $cond: [{ $eq: ["$_bucket", "approved"] }, 1, 0] } },
+              pending: { $sum: { $cond: [{ $eq: ["$_bucket", "pending"] }, 1, 0] } },
+              forwarded: { $sum: { $cond: [{ $eq: ["$_bucket", "forwarded"] }, 1, 0] } },
+              rejected: { $sum: { $cond: [{ $eq: ["$_bucket", "rejected"] }, 1, 0] } },
+              closed: { $sum: { $cond: [{ $eq: ["$_bucket", "closed"] }, 1, 0] } },
+              total: { $sum: 1 },
+            },
+          },
+        ],
+        recent: [
+          {
+            $addFields: {
+              _activityDate: {
+                $ifNull: ["$createdAt", { $ifNull: ["$received_at", "$updatedAt"] }],
+              },
+            },
+          },
+          { $match: { _activityDate: { $gte: cutoffDate } } },
+          { $sort: { _activityDate: -1 } },
+          { $limit: RECENT_ACTIVITIES_LIMIT },
+          {
+            $project: {
+              [idField]: 1,
+              dept_id: 1,
+              status: 1,
+              emp_id: 1,
+              created_by_emp_id: 1,
+              [titleField]: 1,
+              _activityDate: 1,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  return result || { byDept: [], recent: [] };
 };
 
-// Unified summary logic for notesheet, application, and leave
-const buildSummary = (items) => {
+const formatAggregatedModule = (aggResult, departmentsById, employeesById, type, idField, titleField) => {
   const summary = {
     approved: 0,
     pending: 0,
     forwarded: 0,
     rejected: 0,
     closed: 0,
-    total: items.length,
+    total: 0,
   };
 
-  items.forEach((item) => {
-    const status = item.status;
+  const deptEntries = [];
+  for (const row of aggResult.byDept || []) {
+    const deptName = departmentsById.get(row._id) || `Department ${row._id}`;
+    const entry = {
+      name: deptName,
+      approved: row.approved || 0,
+      pending: row.pending || 0,
+      forwarded: row.forwarded || 0,
+      rejected: row.rejected || 0,
+      closed: row.closed || 0,
+      total: row.total || 0,
+    };
+    deptEntries.push(entry);
 
-    if (status === "APPROVED") summary.approved += 1;
-    else if (isItemClosed(item)) summary.closed += 1;
-    else if (status === "REJECTED") summary.rejected += 1;
-    else if (isItemForwarded(item)) summary.forwarded += 1;
-    else if (status === "PENDING") summary.pending += 1;
-    else summary.pending += 1;
-  });
+    summary.approved += entry.approved;
+    summary.pending += entry.pending;
+    summary.forwarded += entry.forwarded;
+    summary.rejected += entry.rejected;
+    summary.closed += entry.closed;
+    summary.total += entry.total;
+  }
 
-  return summary;
-};
+  const byDepartment = deptEntries.concat([{ name: "All", ...summary }]);
 
-const buildDepartmentStats = (items, departmentNamesById) => {
-  const statsByDepartment = new Map();
-
-  const ensureEntry = (name) => {
-    if (!statsByDepartment.has(name)) {
-      statsByDepartment.set(name, {
-        name,
-        approved: 0,
-        pending: 0,
-        forwarded: 0,
-        rejected: 0,
-        closed: 0,
-        total: 0,
-      });
-    }
-
-    return statsByDepartment.get(name);
-  };
-
-  items.forEach((item) => {
-    const deptId = item.dept_id;
-    const deptName = departmentNamesById.get(deptId) || `Department ${deptId}`;
-    const entry = ensureEntry(deptName);
-
-    entry.total += 1;
-
-    if (item.status === "APPROVED") entry.approved += 1;
-    else if (isItemClosed(item)) entry.closed += 1;
-    else if (item.status === "REJECTED") entry.rejected += 1;
-    else if (isItemForwarded(item)) entry.forwarded += 1;
-    else if (item.status === "PENDING") entry.pending += 1;
-    else entry.pending += 1;
-  });
-
-  const allEntry = ensureEntry("All");
-  allEntry.approved = items.filter((item) => item.status === "APPROVED").length;
-  allEntry.pending = items.filter((item) => item.status === "PENDING" && !isItemForwarded(item)).length;
-  allEntry.forwarded = items.filter((item) => isItemForwarded(item)).length;
-  allEntry.rejected = items.filter((item) => item.status === "REJECTED").length;
-  allEntry.closed = items.filter((item) => isItemClosed(item)).length;
-  allEntry.total = items.length;
-
-  return Array.from(statsByDepartment.values()).filter((entry) => entry.name !== "All").concat([allEntry]);
-};
-
-const buildRecentActivities = (items, employeesById, departmentsById, type) => {
-  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-  const cutoff = Date.now() - TWENTY_FOUR_HOURS_MS;
-
-  // Strictly filter items within the last 24 hours
-  const recentItems = items.filter((item) => {
-    const dateValue = item.createdAt || item.received_at || item.updatedAt;
-    if (!dateValue) return false;
-    return new Date(dateValue).getTime() >= cutoff;
-  });
-
-  const sortedItems = [...recentItems].sort((a, b) => {
-    const dateA = new Date(a.createdAt || a.received_at || a.updatedAt || 0).getTime();
-    const dateB = new Date(b.createdAt || b.received_at || b.updatedAt || 0).getTime();
-    return dateB - dateA; // newest first
-  });
-
-  return sortedItems.map((item) => {
+  const recentActivities = (aggResult.recent || []).map((item) => {
     const empId = item.emp_id || item.created_by_emp_id;
     const userName = employeesById.get(empId) || "Unknown User";
     const deptName = departmentsById.get(item.dept_id) || "Unknown Department";
     const statusInfo = getStatusInfo(item.status);
 
     return {
-      id: item.leave_id || item.note_id || item.application_id || `${type}-${item._id}`,
-      title: item.reason || item.subject || item.title || "Untitled",
+      id: item[idField] || `${type}-${item._id}`,
+      title: item[titleField] || "Untitled",
       user: userName,
       dept: deptName,
       status: statusInfo.label,
       statusColor: statusInfo.statusColor,
       bg: "bg-white hover:border-emerald-200",
-      time: getTimeAgo(item.createdAt || item.received_at || item.updatedAt),
+      time: getTimeAgo(item._activityDate),
     };
   });
+
+  return { summary, byDepartment, recentActivities };
 };
 
 export const getCombinedDashboardData = async (req, res) => {
   try {
-    const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
-    const modules = appConfig?.modules || {
-      notesheet: true,
-      application: true,
-      leave: true,
-    };
+    const responseData = await getOrSetCache("dashboard:combined", 15, async () => {
+      const appConfig = await AppConfig.findOne({ key: "app_config" }).select("modules").lean();
+      const modules = appConfig?.modules || {
+        notesheet: true,
+        application: true,
+        leave: true,
+      };
 
-    const isNotesheetEnabled = modules.notesheet !== false;
-    const isApplicationEnabled = modules.application !== false;
-    const isLeaveEnabled = modules.leave !== false;
+      const isNotesheetEnabled = modules.notesheet !== false;
+      const isApplicationEnabled = modules.application !== false;
+      const isLeaveEnabled = modules.leave !== false;
 
-    const [departments, employees, notesheets, applications, leaves] = await Promise.all([
-      Department.find({}, { dept_id: 1, dept_name: 1 }).lean(),
-      Employee.find({}, { emp_id: 1, emp_name: 1 }).lean(),
-      isNotesheetEnabled
-        ? Notesheet.find({ is_deleted: { $ne: true } })
-            .select("note_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id created_by_emp_id subject")
-            .lean()
-        : Promise.resolve([]),
-      isApplicationEnabled
-        ? Application.find({ is_deleted: { $ne: true } })
-            .select("application_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id created_by_emp_id subject")
-            .lean()
-        : Promise.resolve([]),
-      isLeaveEnabled
-        ? LeaveRequest.find({ is_deleted: { $ne: true } })
-            .select("leave_id dept_id status forward_to_emp_id lifecycle_status createdAt received_at updatedAt emp_id reason")
-            .lean()
-        : Promise.resolve([]),
-    ]);
+      const cutoffDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const departmentsById = new Map(departments.map((dept) => [dept.dept_id, dept.dept_name]));
-    const employeesById = new Map(employees.map((employee) => [employee.emp_id, employee.emp_name]));
+      const [departments, notesAgg, appAgg, leaveAgg] = await Promise.all([
+        Department.find({}, { dept_id: 1, dept_name: 1 }).lean(),
+        isNotesheetEnabled
+          ? aggregateModuleStats(Notesheet, "note_id", "subject", cutoffDate)
+          : Promise.resolve(null),
+        isApplicationEnabled
+          ? aggregateModuleStats(Application, "application_id", "subject", cutoffDate)
+          : Promise.resolve(null),
+        isLeaveEnabled
+          ? aggregateModuleStats(LeaveRequest, "leave_id", "reason", cutoffDate)
+          : Promise.resolve(null),
+      ]);
 
-    const responseData = {
-      notesheet: isNotesheetEnabled
-        ? {
-            summary: buildSummary(notesheets),
-            byDepartment: buildDepartmentStats(notesheets, departmentsById),
-            recentActivities: buildRecentActivities(notesheets, employeesById, departmentsById, "notesheet"),
-          }
-        : null,
-      application: isApplicationEnabled
-        ? {
-            summary: buildSummary(applications),
-            byDepartment: buildDepartmentStats(applications, departmentsById),
-            recentActivities: buildRecentActivities(applications, employeesById, departmentsById, "application"),
-          }
-        : null,
-      leave: isLeaveEnabled
-        ? {
-            summary: buildSummary(leaves),
-            byDepartment: buildDepartmentStats(leaves, departmentsById),
-            recentActivities: buildRecentActivities(leaves, employeesById, departmentsById, "leave"),
-          }
-        : null,
-    };
+      const recentEmpIds = new Set();
+      for (const agg of [notesAgg, appAgg, leaveAgg]) {
+        if (!agg?.recent) continue;
+        for (const item of agg.recent) {
+          const id = item.emp_id || item.created_by_emp_id;
+          if (id) recentEmpIds.add(id);
+        }
+      }
+
+      const employees = recentEmpIds.size
+        ? await Employee.find(
+            { emp_id: { $in: Array.from(recentEmpIds) } },
+            { emp_id: 1, emp_name: 1 }
+          ).lean()
+        : [];
+
+      const departmentsById = new Map(departments.map((dept) => [dept.dept_id, dept.dept_name]));
+      const employeesById = new Map(employees.map((employee) => [employee.emp_id, employee.emp_name]));
+
+      return {
+        notesheet: notesAgg
+          ? formatAggregatedModule(notesAgg, departmentsById, employeesById, "notesheet", "note_id", "subject")
+          : null,
+        application: appAgg
+          ? formatAggregatedModule(appAgg, departmentsById, employeesById, "application", "application_id", "subject")
+          : null,
+        leave: leaveAgg
+          ? formatAggregatedModule(leaveAgg, departmentsById, employeesById, "leave", "leave_id", "reason")
+          : null,
+      };
+    });
 
     return res.status(200).json({
       success: true,

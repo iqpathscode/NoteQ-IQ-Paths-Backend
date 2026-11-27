@@ -100,7 +100,10 @@ export const login = async (req, res) => {
 
     setAuthCookie(res, req, token, cookieMaxAge);
 
-    const isDefaultPassword = await bcrypt.compare("iqpaths@123", user.password);
+    const isDefaultPassword =
+      user.isDefaultPassword === false
+        ? false
+        : await bcrypt.compare("iqpaths@123", user.password);
 
     const appConfig = await AppConfig.findOne({ key: "app_config" }).lean();
     const modules = appConfig?.modules || { notesheet: true, application: true, leave: true };
